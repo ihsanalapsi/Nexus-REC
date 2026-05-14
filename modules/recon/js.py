@@ -182,11 +182,19 @@ class JSRecon:
                 (r'pk_live_[0-9a-zA-Z]{24,}', 'stripe_pk'),
                 (r'sk_live_[0-9a-zA-Z]{24,}', 'stripe_sk'),
                 (r'AKIA[0-9A-Z]{16}', 'aws_access_key'),
-                (r'["\']([a-zA-Z0-9/\+=]{32,45})["\']', 'potential_secret'),
                 (r'ghp_[0-9a-zA-Z]{36}', 'github_token'),
                 (r'gho_[0-9a-zA-Z]{36}', 'github_oauth'),
                 (r'xox[bapr]-[0-9a-zA-Z-]{24,}', 'slack_token'),
             ]
+            known_non_secrets = {
+                'createDedupedByCallsiteServerErrorLoggerDev',
+                'createRenderSearchParamsFromClient',
+                'disableSmoothScrollDuringRouteTransition',
+                'DEDUPED_BY_CALLSITE_SERVER_ERROR_LOGGER',
+                'getSelectedParams',
+                'getSelectedSearchParams',
+                'isBot',
+            }
 
             email_pattern = r'["\' ]([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})["\' ]'
             ip_pattern = r'(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})'
@@ -204,7 +212,16 @@ class JSRecon:
                     for pat, ptype in secret_patterns:
                         matches = re.findall(pat, js_content)
                         for m in matches:
-                            all_tokens.add((m[:50], ptype))
+                            val = m if isinstance(m, str) else m[0]
+                            clean = val.strip('"\'')
+                            if clean in known_non_secrets:
+                                continue
+                            if ptype == 'base64_token':
+                                if len(clean) > 200:
+                                    continue
+                                if re.match(r'^[a-z]+(?:[A-Z][a-z]*)*\d*$', clean):
+                                    continue
+                            all_tokens.add((clean[:50], ptype))
                     emails = re.findall(email_pattern, js_content)
                     all_emails.update(emails)
                     ips = re.findall(ip_pattern, js_content)

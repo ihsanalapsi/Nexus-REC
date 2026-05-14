@@ -239,12 +239,15 @@ class NexusREC:
 
     def _ask_waf_bypass(self, waf: list) -> bool:
         waf_str = ", ".join(waf)
-        console.print(f"\n  [bold yellow]⚠  WAF Detected:[/bold yellow] {waf_str}")
+        console.print()
+        console.print(Panel(
+            "[bold yellow]⚠ WAF Detected:[/bold yellow] " + waf_str + "\n\n"
+            "[dim]Vulnerability scan may trigger blocks/bans.[/dim]",
+            border_style="yellow"
+        ))
         ans = console.input(
-            "  [dim]→ Vulnerability scan may trigger blocks/bans. "
-            "Continue with vuln scanning? (y/n): [/dim][bold yellow]"
+            "  [bold white]┃  Continue with vuln scanning? (y/n): [/bold white]"
         ).strip().lower()
-        console.print("[/bold yellow]", end="")
         return ans in ("y", "yes")
 
     # ─────────────────────────────────────────────
@@ -383,6 +386,11 @@ class NexusREC:
                 nonlocal active_phase_num
                 active_phase_num += 1
                 name = ALL_STEPS.get(module_key, "Task")
+                # Explicit print for terminals that don't render Rich live updates
+                progress.console.print(
+                    f"  [bold cyan]▶ Phase {active_phase_num}:[/bold cyan] "
+                    f"{name}..."
+                )
                 label = f"[cyan]  Phase {active_phase_num} — {name}[/cyan]"
                 t = progress.add_task(label, total=2)
                 progress.update(t, advance=1,
@@ -423,9 +431,35 @@ class NexusREC:
             if stack:
                 progress.console.print(f"  [cyan]Stack: {', '.join(stack)}[/cyan]")
 
+            # ── Handle security block ─────────────────────────────
+            if sec_block:
+                progress.stop()
+                console.print()
+                console.print(Panel(
+                    "[bold yellow]🔒 Security Block Active[/bold yellow]\n\n"
+                    f"The target is protected by [bold]{sec_block}[/bold].\n"
+                    "HTTP-based phases (JS, secrets, vuln) will likely fail.\n\n"
+                    "[bold white]Options:[/bold white]\n"
+                    "  [cyan]1[/cyan] Continue scan (results will be limited)\n"
+                    "  [cyan]2[/cyan] Stop and try later\n\n"
+                    "[dim]Tip: Wait 10-15 min or use a different IP[/dim]",
+                    border_style="yellow", width=72
+                ))
+                choice = console.input(
+                    "  [bold white]┃  Your choice (1/2): [/bold white]"
+                ).strip()
+                if choice == "2":
+                    console.print("[red]Scan aborted by user.[/red]")
+                    return
+                console.print("  [dim]→ Continuing with limited results[/dim]")
+                console.print()
+                progress.start()
+
             # ── SMART plan override (Full Scan mode = modules is None) ──
-            if not auto and self.enabled_modules is None:
+            if not auto and self.enabled_modules is None and not sec_block:
+                progress.stop()
                 smart_plan = self._build_smart_plan()
+                progress.start()
             elif auto and self.enabled_modules is None:
                 smart_plan = None
             else:
@@ -925,6 +959,9 @@ class NexusREC:
             console.print(f"\n[bold red]Exposed Sensitive Files: {len(exposed)}[/bold red]")
             for f in exposed[:5]:
                 console.print(f"  [red]{f['path']}[/red] -> Status: {f['status']} ({f['size']} bytes)")
+        blocked_paths = secrets_data.get('blocked_paths', [])
+        if blocked_paths:
+            console.print(f"\n[dim]🚫 Blocked Paths ({len(blocked_paths)}): 403 — edge/WAF protection active[/dim]")
 
         # Internal machine names (from basic or secrets)
         basic_data = self.results.get('basic', {})

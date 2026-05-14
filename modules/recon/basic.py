@@ -298,9 +298,20 @@ class BasicRecon:
             acao = self._headers.get('Access-Control-Allow-Origin', '')
             acm = self._headers.get('Access-Control-Allow-Methods', '')
             ach = self._headers.get('Access-Control-Allow-Headers', '')
+            acc = self._headers.get('Access-Control-Allow-Credentials', '')
             if acao == '*':
-                findings['cors_wildcard'] = True
-                findings['cors_warning'] = 'Wildcard CRA with ' + ('methods: '+acm if acm else 'no method restriction')
+                if acc and acc.lower() == 'true':
+                    findings['cors_wildcard'] = True
+                    findings['cors_warning'] = ('Wildcard CORS with credentials=true — '
+                        'potential data leak. Methods: ' + (acm if acm else 'none'))
+                else:
+                    findings['cors_wildcard'] = True
+                    has_dangerous = any(m in (acm or '').upper() for m in ['PUT', 'POST', 'PATCH', 'DELETE'])
+                    if has_dangerous:
+                        findings['cors_warning'] = ('Wildcard CORS with write methods: ' + acm)
+                    else:
+                        findings['cors_warning'] = ('CORS wildcard detected (no credentials, '
+                            + ('methods: ' + acm if acm else 'static content only') + ') — low risk')
             self.results['infra_findings'] = findings
         except:
             pass

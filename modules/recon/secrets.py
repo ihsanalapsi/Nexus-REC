@@ -59,12 +59,13 @@ class SecretsRecon:
             '/graphql', '/playground', '/graphiql',
         ]
         found = []
+        blocked = []
         for path in sensitive_files:
             try:
                 url = urljoin(self.target_url, path)
                 r = requests.get(url, timeout=8, allow_redirects=False,
                     headers={'User-Agent': 'Mozilla/5.0'})
-                if r.status_code in [200, 301, 302, 403, 401]:
+                if r.status_code in [200, 301, 302]:
                     if self._is_spa_catchall(r):
                         continue
                     ct = r.headers.get('Content-Type', '')
@@ -75,9 +76,15 @@ class SecretsRecon:
                         'size': size, 'content_type': ct,
                         'preview': content_preview,
                     })
+                elif r.status_code == 403:
+                    blocked.append({
+                        'path': path, 'status': 403,
+                        'size': len(r.content), 'note': 'Blocked by edge/WAF',
+                    })
             except:
                 pass
         self.results['exposed_files'] = found
+        self.results['blocked_paths'] = blocked
         return found
 
     def check_firebase(self):
