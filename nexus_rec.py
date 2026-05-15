@@ -1151,6 +1151,68 @@ class NexusREC:
                 btable.add_row(b_url, str(st), sv, ct, api_str)
             console.print(btable)
 
+        # ── Stack-Specific Insights (Laravel / Next.js) ──
+        laravel_data = self.results.get('laravel', {})
+        if laravel_data:
+            console.print("\n[bold magenta]💎 Laravel Insights:[/bold magenta]")
+            
+            # API Debug Leaks
+            api_leaks = laravel_data.get('api_debug_check', [])
+            if api_leaks:
+                leak_table = Table(title="[bold red]⚠ API Debug Leaks (Stack Traces Exposed)[/bold red]", 
+                                  show_header=True, header_style="bold red")
+                leak_table.add_column("Endpoint", style="cyan")
+                leak_table.add_column("Status", style="yellow")
+                leak_table.add_column("Path Leak", style="red")
+                for leak in api_leaks:
+                    path_leak = "[bold red]YES[/bold red]" if leak.get('server_path_leaked') else "No"
+                    leak_table.add_row(leak['endpoint'], str(leak['status']), path_leak)
+                console.print(leak_table)
+
+            # Boost Package
+            boost = laravel_data.get('boost_package', {})
+            if boost.get('detected'):
+                status = "[red]INJECTABLE[/red]" if boost.get('injectable') else "[green]Detected[/green]"
+                console.print(f"  [yellow]📦 Package:[/yellow] {boost.get('package')} — {status}")
+                if boost.get('endpoint'):
+                    console.print(f"    [dim]Endpoint: {boost['endpoint']}[/dim]")
+
+            # WAF & Reverse Proxy
+            waf_list = laravel_data.get('waf', [])
+            if 'Imunify360' in waf_list:
+                console.print(f"  [bold red]🛡️ WAF Detected:[/bold red] Imunify360 (Aggressive Blocking Active)")
+            
+            rev_proxy = laravel_data.get('reverse_proxy')
+            if rev_proxy == 'OpenResty':
+                console.print(f"  [bold cyan]🔄 Reverse Proxy:[/bold cyan] OpenResty (Nginx + Lua)")
+
+            # Routes & Inertia
+            if laravel_data.get('routes_exposed'):
+                console.print(f"  [green]🛣️ Routes:[/green] {len(laravel_data.get('routes', []))} endpoints exposed via window.routes")
+            
+            inertia = laravel_data.get('inertia', {})
+            if inertia.get('detected'):
+                ver = inertia.get('version', 'Unknown')
+                console.print(f"  [cyan]⚛️ Inertia.js:[/cyan] Detected (Version: {ver})")
+
+        nextjs_data = self.results.get('nextjs', {})
+        if nextjs_data:
+            console.print("\n[bold magenta]💎 Next.js Insights:[/bold magenta]")
+            if nextjs_data.get('version'):
+                console.print(f"  [cyan]🚀 Version:[/cyan] {nextjs_data['version']}")
+            if nextjs_data.get('build_id'):
+                console.print(f"  [dim]Build ID: {nextjs_data['build_id']}[/dim]")
+            
+            if nextjs_data.get('middleware_bypass'):
+                details = nextjs_data.get('middleware_details', {})
+                console.print(f"  [bold red]⚠ CRITICAL: Middleware Bypass Detected![/bold red]")
+                console.print(f"    [dim]Path: {details.get('path')} | Payload: {details.get('payload')}[/dim]")
+            
+            leaks = nextjs_data.get('leaks', [])
+            if leaks:
+                for leak in leaks:
+                    console.print(f"  [yellow]⚠ Leak:[/yellow] {leak}")
+
     def save_results(self):
         script_dir = os.path.dirname(os.path.abspath(__file__))
         output_dir = os.path.join(script_dir, 'results')

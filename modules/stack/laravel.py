@@ -168,6 +168,47 @@ class LaravelRecon:
             self.results['debug_mode'] = False
         return self.results
 
+    def check_api_debug_mode(self):
+        """Check debug mode by POSTing to API endpoints with JSON Accept header.
+        Laravel with debug=true returns full stack traces on JSON requests."""
+        api_routes = [
+            ('POST', '/api/create-session', {}),
+            ('POST', '/api/create-chat', {}),
+            ('GET', '/democlients', {}),
+        ]
+        findings = []
+        for method, path, data in api_routes:
+            try:
+                h = {
+                    'User-Agent': 'Mozilla/5.0',
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                }
+                if method == 'POST':
+                    r = requests.post(f"{self.target_url}{path}", headers=h,
+                                      json=data, timeout=10,
+                                      allow_redirects=False)
+                else:
+                    r = requests.get(f"{self.target_url}{path}", headers=h,
+                                     timeout=10, allow_redirects=False)
+
+                if r.status_code in [419, 500] and ('"exception"' in r.text or '"trace"' in r.text):
+                    import re
+                    php_files = set(re.findall(r'"[^"]*\.php"', r.text))
+                    server_base = any('/home/' in p or '/var/www/' in p for p in php_files)
+                    findings.append({
+                        'endpoint': f'{method} {path}',
+                        'status': r.status_code,
+                        'debug_leak': True,
+                        'server_path_leaked': server_base,
+                        'php_files_found': len(php_files),
+                        'size': len(r.content),
+                    })
+            except:
+                pass
+        self.results['api_debug_check'] = findings
+        return findings
+
     def scan_sensitive_routes(self):
         routes = [
             '/telescope', '/horizon', '/nova', '/nova-api',
@@ -201,6 +242,89 @@ class LaravelRecon:
         self.results['sensitive_routes'] = found
         return found
 
+    def detect_boost_package(self):
+        """Detect Laravel Boost package and its browser-logs endpoint."""
+        findings = {'detected': False}
+        try:
+            # Check for browser-logger-active script in HTML
+            r = self._get(self.target_url)
+            if r and 'browser-logger-active' in r.text:
+                findings['detected'] = True
+                findings['package'] = 'Laravel Boost'
+                findings['endpoint'] = '/_boost/browser-logs'
+                findings['browser_logging'] = True
+
+                # Test endpoint accessibility
+                try:
+                    test_r = requests.post(
+                        f"{self.target_url}/_boost/browser-logs",
+                        headers={
+                            'User-Agent': 'Mozilla/5.0',
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Content-Type': 'application/json',
+                        },
+                        json={"logs": [{"type": "test", "timestamp": "2026-01-01T00:00:00Z",
+                                        "data": ["test"], "url": self.target_url,
+                                        "userAgent": "Mozilla/5.0"}]},
+                        timeout=8
+                    )
+                    if test_r.status_code == 200 and test_r.text == '{"status":"logged"}':
+                        findings['injectable'] = True
+                    elif test_r.status_code == 500:
+                        findings['error_leak'] = True
+                        findings['error_leak_body'] = test_r.text[:300]
+                except:
+                    pass
+
+            # Check for InjectBoost middleware in error traces
+            if r and 'InjectBoost' in r.text:
+                findings['detected'] = True
+                findings['middleware'] = 'Laravel\\Boost\\Middleware\\InjectBoost'
+
+        except:
+            pass
+        self.results['boost_package'] = findings
+        return findings
+
+    def detect_imunify360(self):
+        """Detect Imunify360 WAF."""
+        try:
+            r = requests.get(f"{self.target_url}/.env", timeout=8,
+                headers={'User-Agent': 'Mozilla/5.0'},
+                allow_redirects=False)
+            if r.status_code == 403:
+                body = r.text
+                if 'imunify' in body.lower() or 'Imunify360' in body:
+                    self.results['waf'] = self.results.get('waf', []) + ['Imunify360']
+                    return True
+            # Also check response body for imunify360 messages
+            if 'imunify360' in r.text.lower():
+                self.results['waf'] = self.results.get('waf', []) + ['Imunify360']
+                return True
+        except:
+            pass
+        return False
+
+    def detect_openresty(self):
+        """Detect OpenResty reverse proxy."""
+        try:
+            r = requests.get(f"{self.target_url}/non-existent", timeout=8,
+                headers={'User-Agent': 'Mozilla/5.0'})
+            server = r.headers.get('Server', '')
+            if 'openresty' in server.lower():
+                self.results['reverse_proxy'] = 'OpenResty'
+                return True
+            # Check for 415 Unsupport Media Type from openresty
+            r2 = requests.post(f"{self.target_url}/api/test-openresty",
+                headers={'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json'},
+                json={}, timeout=8)
+            if r2.status_code == 415 and 'openresty' in r2.text.lower():
+                self.results['reverse_proxy'] = 'OpenResty'
+                return True
+        except:
+            pass
+        return False
+
     def check_cve_vulnerabilities(self):
         vulns = []
         try:
@@ -233,6 +357,10 @@ class LaravelRecon:
         self.extract_oauth_ids()
         self.analyze_cookies()
         self.check_debug_mode()
+        self.check_api_debug_mode()
+        self.detect_boost_package()
+        self.detect_imunify360()
+        self.detect_openresty()
         self.scan_sensitive_routes()
         self.check_cve_vulnerabilities()
         return self.results
