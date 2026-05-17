@@ -49,6 +49,13 @@ MODULES_REGISTRY = {
     'dns': 'modules.recon.dns.DNSRecon',
     'endpoints': 'modules.recon.endpoints.EndpointRecon',
     'payment': 'modules.recon.payment_gateway.PaymentGatewayRecon',
+    'supabase_rls': 'modules.recon.supabase_rls.SupabaseRLSRecon',
+    'supabase_rpc': 'modules.recon.supabase_rpc.SupabaseRPCRecon',
+    'supabase_storage': 'modules.recon.supabase_storage.SupabaseStorageRecon',
+    'wellknown': 'modules.recon.wellknown.WellKnownRecon',
+    'apk': 'modules.recon.apk_analysis.APKRecon',
+    'dns_detritus': 'modules.recon.dns_detritus.DNSDetritusRecon',
+    'admin_scan': 'modules.recon.admin_scan.AdminScanRecon',
 }
 
 STACK_MODULES = {
@@ -324,17 +331,24 @@ class NexusREC:
         # We run basic FIRST always, then decide.
         # ─────────────────────────────────────────
         ALL_STEPS = {
-            "basic":      "Target Fingerprinting & Headers",
-            "subdomain":  "Subdomain Enumeration",
-            "cloud":      "Cloud & Bucket Detection",
-            "js":         "JavaScript & API Extraction",
-            "graphql":    "GraphQL Introspection",
-            "secrets":    "Secrets & Exposed Files",
-            "vuln":       "Vulnerability Scanner",
-            "business":   "Business Logic Checks",
-            "cookies":    "Cookie & Session Analysis",
-            "dns":        "DNS, SSL & Port Analysis",
-            "endpoints":  "Endpoint Discovery",
+            "basic":           "Target Fingerprinting & Headers",
+            "subdomain":       "Subdomain Enumeration",
+            "cloud":           "Cloud & Bucket Detection",
+            "js":              "JavaScript & API Extraction",
+            "graphql":         "GraphQL Introspection",
+            "secrets":         "Secrets & Exposed Files",
+            "vuln":            "Vulnerability Scanner",
+            "business":        "Business Logic Checks",
+            "cookies":         "Cookie & Session Analysis",
+            "dns":             "DNS, SSL & Port Analysis",
+            "endpoints":       "Endpoint Discovery",
+            "supabase_rls":    "Supabase RLS Policy Testing",
+            "supabase_rpc":    "Supabase RPC Enumeration",
+            "supabase_storage":"Supabase Storage Audit",
+            "wellknown":       "Well-Known / llms.txt Discovery",
+            "apk":             "APK Analysis",
+            "dns_detritus":    "DNS Detritus Detection",
+            "admin_scan":      "Admin Subdomain Deep Scan",
         }
 
         total_steps = len(ALL_STEPS)
@@ -667,7 +681,118 @@ class NexusREC:
             else:
                 _skip("endpoints")
 
-            # ── STEP 12: Backend URL scan (from JS analysis) ──
+            # ── STEP 12: Supabase RLS Testing ──────────────
+            if should_run('supabase_rls'):
+                t = step_task('supabase_rls')
+                supabase_mod = self._load_module(MODULES_REGISTRY['supabase_rls'])
+                if supabase_mod:
+                    self._run_module('supabase_rls', supabase_mod, progress, t)
+                    open_tables = self.results.get('supabase_rls', {}).get('rls_open_tables', [])
+                    if open_tables:
+                        progress.console.print(f"  [bold red]⚠ {len(open_tables)} Supabase tables accessible with anon_key![/bold red]")
+                else:
+                    progress.update(t, advance=1)
+                _tick("supabase_rls")
+            else:
+                _skip("supabase_rls")
+
+            # ── STEP 13: Supabase RPC Enumeration ──────────
+            if should_run('supabase_rpc'):
+                t = step_task('supabase_rpc')
+                rpc_mod = self._load_module(MODULES_REGISTRY['supabase_rpc'])
+                if rpc_mod:
+                    self._run_module('supabase_rpc', rpc_mod, progress, t)
+                    exposed_rpcs = self.results.get('supabase_rpc', {}).get('rpc_exposed', [])
+                    if exposed_rpcs:
+                        progress.console.print(f"  [bold yellow]⚡ {len(exposed_rpcs)} Supabase RPC functions discovered[/bold yellow]")
+                else:
+                    progress.update(t, advance=1)
+                _tick("supabase_rpc")
+            else:
+                _skip("supabase_rpc")
+
+            # ── STEP 14: Supabase Storage Audit ────────────
+            if should_run('supabase_storage'):
+                t = step_task('supabase_storage')
+                storage_mod = self._load_module(MODULES_REGISTRY['supabase_storage'])
+                if storage_mod:
+                    self._run_module('supabase_storage', storage_mod, progress, t)
+                    public_buckets = self.results.get('supabase_storage', {}).get('public_buckets', [])
+                    if public_buckets:
+                        progress.console.print(f"  [bold red]⚠ {len(public_buckets)} public Supabase storage buckets found![/bold red]")
+                else:
+                    progress.update(t, advance=1)
+                _tick("supabase_storage")
+            else:
+                _skip("supabase_storage")
+
+            # ── STEP 15: Well-Known Discovery ──────────────
+            if should_run('wellknown'):
+                t = step_task('wellknown')
+                wk_mod = self._load_module(MODULES_REGISTRY['wellknown'])
+                if wk_mod:
+                    self._run_module('wellknown', wk_mod, progress, t)
+                    llms = self.results.get('wellknown', {}).get('llms_txt_found', [])
+                    if llms:
+                        progress.console.print(f"  [bold yellow]📄 llms.txt found! Potential intelligence source[/bold yellow]")
+                else:
+                    progress.update(t, advance=1)
+                _tick("wellknown")
+            else:
+                _skip("wellknown")
+
+            # ── STEP 16: APK Analysis ──────────────────────
+            if should_run('apk'):
+                t = step_task('apk')
+                apk_mod = self._load_module(MODULES_REGISTRY['apk'])
+                if apk_mod:
+                    self._run_module('apk', apk_mod, progress, t)
+                    apk_refs = self.results.get('apk', {}).get('apk_references', [])
+                    if apk_refs:
+                        progress.console.print(f"  [green]📱 {len(apk_refs)} APK/App references found[/green]")
+                    apk_keys = self.results.get('apk', {}).get('apk_secrets', [])
+                    if apk_keys:
+                        progress.console.print(f"  [bold yellow]🔑 {len(apk_keys)} potential secrets extracted from APK[/bold yellow]")
+                else:
+                    progress.update(t, advance=1)
+                _tick("apk")
+            else:
+                _skip("apk")
+
+            # ── STEP 17: DNS Detritus Detection ───────────
+            if should_run('dns_detritus'):
+                t = step_task('dns_detritus')
+                detritus_mod = self._load_module(MODULES_REGISTRY['dns_detritus'])
+                if detritus_mod:
+                    self._run_module('dns_detritus', detritus_mod, progress, t)
+                    total = self.results.get('dns_detritus', {}).get('total_detritus', 0)
+                    if total:
+                        progress.console.print(f"  [bold yellow]🗑️ {total} DNS detritus records found[/bold yellow]")
+                else:
+                    progress.update(t, advance=1)
+                _tick("dns_detritus")
+            else:
+                _skip("dns_detritus")
+
+            # ── STEP 18: Admin Subdomain Deep Scan ────────
+            if should_run('admin_scan'):
+                t = step_task('admin_scan')
+                admin_mod = self._load_module(MODULES_REGISTRY['admin_scan'])
+                if admin_mod:
+                    self._run_module('admin_scan', admin_mod, progress, t)
+                    admin_subs = self.results.get('admin_scan', {}).get('admin_subdomains', [])
+                    if admin_subs:
+                        progress.console.print(f"  [bold yellow]🔐 {len(admin_subs)} admin subdomains discovered[/bold yellow]")
+                    accessible = self.results.get('admin_scan', {}).get('accessible_admin', [])
+                    if accessible:
+                        progress.console.print(f"  [bold red]⚠ {len(accessible)} admin subdomains potentially accessible![/bold red]")
+                else:
+                    progress.update(t, advance=1)
+                _tick("admin_scan")
+            else:
+                _skip("admin_scan")
+
+            # ── STEP 19: Backend URL scan (from JS analysis) ──
             backend_urls = self.results.get('subdomain', {}).get('backend_discovered', [])
             real_backends = [b for b in backend_urls
                              if self.domain not in b.get('url', '')
@@ -1350,6 +1475,225 @@ class NexusREC:
             if leaks:
                 for leak in leaks:
                     console.print(f"  [yellow]⚠ Leak:[/yellow] {leak}")
+
+        # ── Supabase RLS Testing ─────────────────────────
+        supabase_rls = self.results.get('supabase_rls', {})
+        if supabase_rls:
+            console.print("\n[bold magenta]🛢️ Supabase RLS Analysis:[/bold magenta]")
+            project = supabase_rls.get('supabase_project', {})
+            if project:
+                if project.get('project_ref'):
+                    console.print(f"  [cyan]Project Ref:[/cyan] {project['project_ref']}")
+                if project.get('anon_key_preview'):
+                    console.print(f"  [yellow]Anon Key:[/yellow] {project['anon_key_preview']}")
+                if project.get('service_role_warning'):
+                    console.print(f"  [bold red]⚠ {project['service_role_warning']}[/bold red]")
+
+            open_tables = supabase_rls.get('rls_open_tables', [])
+            if open_tables:
+                rls_table = Table(title=f"[bold red]⚠ Open Supabase Tables ({len(open_tables)})[/bold red]",
+                                 show_header=True, header_style="bold red")
+                rls_table.add_column("Table", style="cyan")
+                rls_table.add_column("Status", style="yellow")
+                rls_table.add_column("Preview", style="dim", width=50)
+                for t in open_tables[:10]:
+                    rls_table.add_row(
+                        t.get('table', '?'),
+                        str(t.get('status', '?')),
+                        str(t.get('preview', ''))[:48]
+                    )
+                console.print(rls_table)
+
+        # ── Supabase RPC Enumeration ─────────────────────
+        supabase_rpc = self.results.get('supabase_rpc', {})
+        exposed_rpcs = supabase_rpc.get('rpc_exposed', [])
+        if exposed_rpcs:
+            rpc_table = Table(title=f"[bold yellow]Supabase RPC Functions ({len(exposed_rpcs)})[/bold yellow]",
+                             show_header=True, header_style="bold yellow")
+            rpc_table.add_column("Function", style="cyan")
+            rpc_table.add_column("Status", style="yellow")
+            rpc_table.add_column("Needs Params", style="white")
+            rpc_table.add_column("Response", style="dim", width=40)
+            for f in exposed_rpcs[:15]:
+                rpc_table.add_row(
+                    f.get('function', '?'),
+                    str(f.get('status', '?')),
+                    '[red]Yes[/red]' if f.get('needs_params') else '[green]No[/green]',
+                    str(f.get('response', f.get('error', '')))[:38]
+                )
+            console.print(rpc_table)
+
+        # ── Supabase Storage Audit ───────────────────────
+        supabase_storage = self.results.get('supabase_storage', {})
+        public_buckets = supabase_storage.get('public_buckets', [])
+        if public_buckets:
+            storage_table = Table(title=f"[bold red]⚠ Public Supabase Storage Buckets ({len(public_buckets)})[/bold red]",
+                                 show_header=True, header_style="bold red")
+            storage_table.add_column("Bucket ID", style="cyan")
+            storage_table.add_column("Name", style="white")
+            storage_table.add_column("Objects", style="yellow")
+            storage_table.add_column("Public URLs", style="dim", width=40)
+            for b in public_buckets[:10]:
+                obj_count = b.get('object_count', 0)
+                urls = b.get('public_urls', [])
+                url_str = urls[0] if urls else '—'
+                storage_table.add_row(
+                    b.get('id', '?'),
+                    b.get('name', '?'),
+                    str(obj_count),
+                    url_str[:38]
+                )
+            console.print(storage_table)
+
+        common_buckets = supabase_storage.get('common_buckets', [])
+        if common_buckets:
+            console.print(f"  [yellow]→ {len(common_buckets)} additional accessible buckets via direct name guessing[/yellow]")
+            for cb in common_buckets[:5]:
+                console.print(f"    [dim]bucket/{cb['bucket']}: {cb.get('object_count', 0)} objects[/dim]")
+
+        # ── Well-Known Discovery ─────────────────────────
+        wk_data = self.results.get('wellknown', {})
+        wk_files = wk_data.get('wellknown_files', [])
+        if wk_files:
+            console.print("\n[bold magenta]📄 Well-Known Files Discovery:[/bold magenta]")
+            wk_table = Table(title=f"[bold]Well-Known Files ({len(wk_files)})[/bold]",
+                            show_header=True, header_style="bold cyan")
+            wk_table.add_column("Path", style="cyan")
+            wk_table.add_column("Status", style="yellow")
+            wk_table.add_column("Size", style="white")
+            wk_table.add_column("Category", style="dim")
+            for f in wk_files:
+                wk_table.add_row(
+                    f.get('path', '?'),
+                    str(f.get('status', '?')),
+                    str(f.get('size', 0)),
+                    f.get('category', 'other'),
+                )
+            console.print(wk_table)
+
+            llms = wk_data.get('llms_txt_found', [])
+            if llms:
+                console.print(f"  [bold yellow]📄 llms.txt FOUND — potential intelligence goldmine![/bold yellow]")
+                for entry in llms:
+                    preview = entry.get('preview', '')
+                    if len(preview) > 300:
+                        preview = preview[:300] + '...'
+                    console.print(f"  [dim]Content preview:[/dim]")
+                    console.print(f"  [white]{preview}[/white]")
+
+            llms_analysis = wk_data.get('llms_analysis', {})
+            if llms_analysis:
+                for category, items in llms_analysis.items():
+                    if items:
+                        console.print(f"  [cyan]{category.replace('_', ' ').title()}:[/cyan] {len(items)} items")
+                        for item in items[:5]:
+                            console.print(f"    [dim]- {item}[/dim]")
+
+        # ── APK Analysis ─────────────────────────────────
+        apk_data = self.results.get('apk', {})
+        apk_refs = apk_data.get('apk_references', [])
+        if apk_refs:
+            console.print("\n[bold magenta]📱 APK/Mobile App References:[/bold magenta]")
+            for ref in apk_refs:
+                if ref.get('method') == 'direct_download':
+                    console.print(f"  [yellow]📦 APK:[/yellow] {ref['url']}")
+                elif ref.get('method') == 'play_store':
+                    console.print(f"  [cyan]📱 Play Store:[/cyan] {ref.get('package', ref['url'])}")
+                elif ref.get('method') == 'app_store':
+                    console.print(f"  [cyan]📱 App Store:[/cyan] {ref.get('bundle_id', ref['url'])}")
+
+        apk_extracted = apk_data.get('apk_extracted', [])
+        if apk_extracted:
+            console.print(f"\n[bold yellow]🔍 APK Analysis Results ({len(apk_extracted)} APKs):[/bold yellow]")
+            for ae in apk_extracted:
+                endpoints = ae.get('extracted_endpoints', [])
+                keys = ae.get('extracted_keys', [])
+                urls = ae.get('extracted_urls', [])
+                console.print(f"  [cyan]{ae['url']}[/cyan]")
+                if endpoints:
+                    console.print(f"    [green]API Endpoints: {len(endpoints)}[/green]")
+                    for ep in endpoints[:5]:
+                        console.print(f"      [dim]- {ep}[/dim]")
+                if keys:
+                    console.print(f"    [red]Secrets: {len(keys)}[/red]")
+                    for k in keys[:5]:
+                        console_print = console.print
+                        console_print(f"      [yellow]{k.get('type', '?')}: {k.get('value', '?')}[/yellow]")
+                if urls:
+                    console.print(f"    [dim]URLs: {len(urls)}[/dim]")
+
+        # ── DNS Detritus ─────────────────────────────────
+        dns_detritus = self.results.get('dns_detritus', {})
+        total_detritus = dns_detritus.get('total_detritus', 0)
+        if total_detritus:
+            console.print(f"\n[bold yellow]🗑️ DNS Detritus Found ({total_detritus} records):[/bold yellow]")
+            cloudflare_detritus = dns_detritus.get('cloudflare_detritus', [])
+            if cloudflare_detritus:
+                det_table = Table(title=f"[bold]Cloudflare DNS Detritus ({len(cloudflare_detritus)})[/bold]",
+                                 show_header=True, header_style="bold yellow")
+                det_table.add_column("Subdomain", style="cyan")
+                det_table.add_column("IP", style="white")
+                det_table.add_column("Service", style="dim")
+                det_table.add_column("Confidence", style="yellow")
+                for d in cloudflare_detritus[:10]:
+                    det_table.add_row(
+                        d.get('subdomain', '?'),
+                        d.get('ip', '?'),
+                        d.get('service', '?'),
+                        d.get('confidence', '?'),
+                    )
+                console.print(det_table)
+
+            resolvable = dns_detritus.get('resolvable_legacy', [])
+            if resolvable:
+                console.print(f"  [yellow]→ {len(resolvable)} resolvable legacy DNS records[/yellow]")
+                for r in resolvable[:5]:
+                    console_print(f"    [dim]{r['subdomain']} ({r['ip']})[/dim]")
+
+        # ── Admin Subdomain Deep Scan ────────────────────
+        admin_data = self.results.get('admin_scan', {})
+        admin_subs = admin_data.get('admin_subdomains', [])
+        if admin_subs:
+            console.print(f"\n[bold magenta]🔐 Admin Subdomain Scan ({len(admin_subs)}):[/bold magenta]")
+            admin_table = Table(title=f"[bold]Admin Subdomains[/bold]",
+                               show_header=True, header_style="bold yellow")
+            admin_table.add_column("Subdomain", style="cyan")
+            admin_table.add_column("IP", style="white")
+            admin_table.add_column("Status", style="yellow")
+            admin_table.add_column("Type", style="dim")
+            admin_table.add_column("Tech", style="green")
+            for a in admin_subs[:15]:
+                st = str(a.get('http_status', 'DNS'))
+                st_str = f"[green]{st}[/]" if st in ['200', '301', '302'] else f"[yellow]{st}[/]"
+                pg = a.get('page_type', '')
+                tech = a.get('technologies', {})
+                tech_str = ', '.join(tech.values()) if tech else ''
+                admin_table.add_row(
+                    a.get('subdomain', '?'),
+                    a.get('ip', '?'),
+                    st_str,
+                    pg,
+                    tech_str,
+                )
+            console.print(admin_table)
+
+            admin_paths = admin_data.get('admin_paths', [])
+            if admin_paths:
+                path_table = Table(title=f"[bold]Admin Paths ({len(admin_paths)})[/bold]",
+                                  show_header=True, header_style="bold yellow")
+                path_table.add_column("Path", style="cyan")
+                path_table.add_column("Status", style="yellow")
+                path_table.add_column("Size", style="white")
+                path_table.add_column("Redirect", style="dim", width=40)
+                for p in admin_paths[:15]:
+                    redirect = p.get('redirect_to', '') or '—'
+                    path_table.add_row(
+                        p.get('path', '?'),
+                        str(p.get('status', '?')),
+                        str(p.get('size', 0)),
+                        redirect[:38],
+                    )
+                console.print(path_table)
 
     def save_results(self):
         script_dir = os.path.dirname(os.path.abspath(__file__))
