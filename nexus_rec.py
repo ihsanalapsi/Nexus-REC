@@ -48,6 +48,7 @@ MODULES_REGISTRY = {
     'cookies': 'modules.recon.cookies.CookieRecon',
     'dns': 'modules.recon.dns.DNSRecon',
     'endpoints': 'modules.recon.endpoints.EndpointRecon',
+    'payment': 'modules.recon.payment_gateway.PaymentGatewayRecon',
 }
 
 STACK_MODULES = {
@@ -430,6 +431,29 @@ class NexusREC:
                 progress.console.print(f"  [yellow]WAF: {', '.join(waf)}[/yellow]")
             if stack:
                 progress.console.print(f"  [cyan]Stack: {', '.join(stack)}[/cyan]")
+
+            # ── Payment Gateway Detection (passive, from basic HTML/CSP) ──
+            basic_html = self.results.get('basic', {}).get('_html', '')
+            basic_headers = self.results.get('basic', {}).get('headers', {})
+            csp_header = basic_headers.get('Content-Security-Policy', basic_headers.get('content-security-policy', ''))
+            if basic_html or csp_header:
+                try:
+                    from modules.recon.payment_gateway import PaymentGatewayRecon
+                    pg = PaymentGatewayRecon(self.target)
+                    pg_results = pg.run_all(html=basic_html, csp=csp_header, base_url=self.target)
+                    if pg_results.get('csp_analysis') or pg_results.get('payment_keys'):
+                        self.results['payment_gateway'] = pg_results
+                        gateways = list(pg_results.get('csp_analysis', {}).keys())
+                        if gateways:
+                            progress.console.print(f"  [green]💳 Payment Gateways: {', '.join(gateways)}[/green]")
+                        keys = pg_results.get('payment_keys', {})
+                        if keys:
+                            for provider, key_list in keys.items():
+                                for k in key_list:
+                                    if isinstance(k, dict):
+                                        progress.console.print(f"  [yellow]🔑 {provider} key ({k.get('mode','?')}/{k.get('type','?')})[/yellow]")
+                except Exception:
+                    pass
 
             # ── Handle security block ─────────────────────────────
             if sec_block:
@@ -910,6 +934,44 @@ class NexusREC:
                 ma_table.add_row(ma.get('endpoint', '?'), str(ma.get('status', '?')), payload_str[:48])
             console.print(ma_table)
 
+        # Payment Data Leak findings
+        payment_leaks = vuln_data.get('payment_data_leak', [])
+        if payment_leaks:
+            pl_table = Table(title=f"[bold red]💳 Payment Data Leaks ({len(payment_leaks)})[/bold red]",
+                            show_header=True, header_style="bold red")
+            pl_table.add_column("Endpoint", style="cyan", width=28)
+            pl_table.add_column("Status", style="yellow", width=6)
+            pl_table.add_column("Size", style="white", width=8)
+            pl_table.add_column("Payment Sigs", style="red", width=30)
+            pl_table.add_column("PII", style="yellow", width=20)
+            for pl in payment_leaks:
+                pay_sigs = ', '.join(pl.get('payment_signatures', [])[:4])
+                pii_sigs = ', '.join(pl.get('pii_signatures', [])[:4])
+                pl_table.add_row(
+                    pl.get('endpoint', '?'),
+                    str(pl.get('status', '?')),
+                    str(pl.get('size', '?')),
+                    pay_sigs,
+                    pii_sigs
+                )
+                # Show classification details if available
+                cls = pl.get('classification', {})
+                if cls:
+                    methods = cls.get('payment_methods_detected', [])
+                    if methods:
+                        console.print(f"    [dim]Payment Methods: {', '.join(methods)}[/dim]")
+                    if cls.get('has_client_secret'):
+                        console.print(f"    [bold red]⚠ client_secret EXPOSED![/bold red]")
+                    if cls.get('is_test_mode') is False:
+                        console.print(f"    [bold red]⚠ LIVE MODE (not test!)[/bold red]")
+                    pii = cls.get('pii_fields', [])
+                    if pii:
+                        console.print(f"    [yellow]PII Fields: {', '.join(pii)}[/yellow]")
+                    records = cls.get('total_records', 0)
+                    if records:
+                        console.print(f"    [dim]Records: {records}[/dim]")
+            console.print(pl_table)
+
         # Separate HTTP_METHODS (different schema) from other vulns
         method_findings = vuln_data.pop('http_methods', []) if isinstance(vuln_data.get('http_methods'), list) else []
         real_vulns = {k: v for k, v in vuln_data.items() if isinstance(v, list) and v}
@@ -1190,6 +1252,42 @@ class NexusREC:
                 console.print(f"  [cyan]{d['ip']}[/cyan] → [green]{d.get('redirect_url', 'N/A')}[/green]")
                 if d.get('backend_domain'):
                     console.print(f"    [dim]Domain: {d['backend_domain']}[/dim]")
+
+        # ── Payment Gateway Insights ──
+        pg_data = self.results.get('payment_gateway', {})
+        if pg_data:
+            console.print("\n[bold magenta]💳 Payment Gateway Insights:[/bold magenta]")
+            csp_gateways = pg_data.get('csp_analysis', {})
+            if csp_gateways:
+                pg_table = Table(title="[bold]Gateways Detected (CSP)[/bold]",
+                                show_header=True, header_style="bold green")
+                pg_table.add_column("Provider", style="cyan", width=15)
+                pg_table.add_column("Domains", style="white", width=40)
+                pg_table.add_column("CSP Directives", style="dim", width=30)
+                for gw_name, gw_info in csp_gateways.items():
+                    domains = ', '.join(gw_info.get('domains', []))
+                    directives = ', '.join(gw_info.get('directives', []))
+                    pg_table.add_row(gw_name.title(), domains, directives)
+                console.print(pg_table)
+
+            payment_keys = pg_data.get('payment_keys', {})
+            if payment_keys:
+                for provider, keys in payment_keys.items():
+                    for k in keys:
+                        if isinstance(k, dict):
+                            mode = k.get('mode', '?')
+                            ktype = k.get('type', '?')
+                            kval = k.get('key', '?')
+                            color = "[red]" if ktype == 'secret' or mode == 'live' else "[yellow]"
+                            console.print(f"  {color}🔑 {provider.title()} Key:[/{color[1:]} {kval} ({mode}/{ktype})")
+                        else:
+                            console.print(f"  [dim]🔑 {provider}: {k}[/dim]")
+
+            webhooks = pg_data.get('webhooks', [])
+            if webhooks:
+                console.print(f"  [yellow]🪝 Webhook References ({len(webhooks)}):[/yellow]")
+                for wh in webhooks[:5]:
+                    console.print(f"    [dim]{wh}[/dim]")
 
         # ── Stack-Specific Insights (Laravel / Next.js) ──
         laravel_data = self.results.get('laravel', {})
