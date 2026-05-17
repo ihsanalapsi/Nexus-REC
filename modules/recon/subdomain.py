@@ -50,6 +50,10 @@ class SubdomainRecon:
                 'auth2', 'sso', 'oauth', 'track', 'tracking',
                 'analytics', 'metrics', 'player', 'console',
                 'mobile', 'm', 'app',
+                'bkapi', 'bkapi-v2', 'api-gateway', 'backend-api',
+                'api-backend', 'server-api', 'api-server', 'backend-svc',
+                'svc', 'services', 'internal-api', 'private',
+                'rest-api', 'rest', 'graphql-api',
             ]
         found = []
         not_done = set()
@@ -248,6 +252,37 @@ class SubdomainRecon:
                     })
         self.results['backend_discovered'] = backends
         return self.results
+
+    def discover_backend_from_ip(self, ip_address):
+        results = {
+            'ip': ip_address,
+            'redirect_found': False,
+            'redirect_url': None,
+            'backend_domain': None,
+        }
+        try:
+            r = requests.get(f"http://{ip_address}", timeout=8, allow_redirects=True,
+                headers={'User-Agent': 'Mozilla/5.0'})
+            if r.status_code in [200, 301, 302] and r.url != f"http://{ip_address}/":
+                results['redirect_found'] = True
+                results['redirect_url'] = r.url
+                parsed = urlparse(r.url)
+                results['backend_domain'] = parsed.hostname
+                return results
+        except:
+            pass
+        try:
+            r = requests.get(f"https://{ip_address}", timeout=8, allow_redirects=True,
+                headers={'User-Agent': 'Mozilla/5.0'})
+            if r.status_code in [200, 301, 302] and r.url != f"https://{ip_address}/":
+                results['redirect_found'] = True
+                results['redirect_url'] = r.url
+                parsed = urlparse(r.url)
+                results['backend_domain'] = parsed.hostname
+        except:
+            pass
+        self.results['backend_ip_discovery'] = results
+        return results
 
     def run_all(self, js_api_urls=None):
         self.enumerate_subdomains()

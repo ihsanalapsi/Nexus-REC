@@ -478,6 +478,24 @@ class NexusREC:
                 if sub_mod:
                     sub_mod.domain = self.domain
                     self._run_module('subdomain', sub_mod, progress, t)
+                    # Auto-run backend IP discovery on resolved subdomain IPs
+                    sub_results = self.results.get('subdomain', {})
+                    resolved_subs = sub_results.get('subdomains', [])
+                    bkapi_subs = [s for s in resolved_subs
+                                  if any(kw in s.get('subdomain', '').lower()
+                                         for kw in ['bkapi', 'backend', 'api-server', 'api-backend', 'internal-api'])
+                                  and s.get('ip')]
+                    if bkapi_subs:
+                        progress.console.print(f"  [green]→ Found {len(bkapi_subs)} backend subdomain(s), probing IP redirects...[/green]")
+                        ip_discoveries = []
+                        for bs in bkapi_subs[:5]:
+                            disc = sub_mod.discover_backend_from_ip(bs['ip'])
+                            if disc.get('redirect_found'):
+                                ip_discoveries.append(disc)
+                                progress.console.print(f"    [yellow]⚡ {bs['ip']} → {disc.get('backend_domain')}[/yellow]")
+                        if ip_discoveries:
+                            self.results['backend_ip_discovery'] = ip_discoveries
+                            self.results['subdomain'] = getattr(sub_mod, 'results', self.results.get('subdomain', {}))
                 else:
                     progress.update(t, advance=1)
                 _tick("subdomain")
@@ -879,6 +897,19 @@ class NexusREC:
         total_vulns = sum(len(v) for v in vuln_data.values() if isinstance(v, list))
         homepage_len = self.results.get('basic', {}).get('content_length', 0)
 
+        # Mass Assignment findings
+        mass_assign = vuln_data.get('mass_assignment', [])
+        if mass_assign:
+            ma_table = Table(title=f"[bold red]⚠ Mass Assignment Vulnerabilities ({len(mass_assign)})[/bold red]",
+                            show_header=True, header_style="bold red")
+            ma_table.add_column("Endpoint", style="cyan", width=30)
+            ma_table.add_column("Status", style="yellow", width=8)
+            ma_table.add_column("Payload", style="white", width=50)
+            for ma in mass_assign:
+                payload_str = ', '.join(f"{k}={v}" for k, v in ma.get('payload', {}).items())
+                ma_table.add_row(ma.get('endpoint', '?'), str(ma.get('status', '?')), payload_str[:48])
+            console.print(ma_table)
+
         # Separate HTTP_METHODS (different schema) from other vulns
         method_findings = vuln_data.pop('http_methods', []) if isinstance(vuln_data.get('http_methods'), list) else []
         real_vulns = {k: v for k, v in vuln_data.items() if isinstance(v, list) and v}
@@ -1150,6 +1181,15 @@ class NexusREC:
                 api_str = ', '.join(f"{a['path']}({a['status']})" for a in apis) if apis else '—'
                 btable.add_row(b_url, str(st), sv, ct, api_str)
             console.print(btable)
+
+        # Backend IP Discovery (from subdomain IP redirect probing)
+        ip_disc = self.results.get('backend_ip_discovery', [])
+        if ip_disc:
+            console.print(f"\n[bold yellow]🔍 Backend IP Discovery ({len(ip_disc)}):[/bold yellow]")
+            for d in ip_disc:
+                console.print(f"  [cyan]{d['ip']}[/cyan] → [green]{d.get('redirect_url', 'N/A')}[/green]")
+                if d.get('backend_domain'):
+                    console.print(f"    [dim]Domain: {d['backend_domain']}[/dim]")
 
         # ── Stack-Specific Insights (Laravel / Next.js) ──
         laravel_data = self.results.get('laravel', {})
