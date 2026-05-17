@@ -1230,6 +1230,8 @@ class NexusREC:
                     console.print(f"  [cyan]{j['cookie_name']}[/cyan]: {pay}")
                     if j.get('has_cred_fields'):
                         console.print(f"    [red]⚠ Contains credential fields![/red]")
+                    if j.get('hs256_cracked'):
+                        console.print(f"    [bold red]🔓 HS256 CRACKED![/bold red] Secret: [green]{j['hs256_secret']}[/green]")
 
             if cred_leak:
                 console.print(f"\n[bold red]⚠ Credential Leakage in Cookies:[/bold red]")
@@ -1449,6 +1451,24 @@ class NexusREC:
             if rev_proxy == 'OpenResty':
                 console.print(f"  [bold cyan]🔄 Reverse Proxy:[/bold cyan] OpenResty (Nginx + Lua)")
 
+            # Server Detection
+            server_detected = laravel_data.get('server')
+            if server_detected:
+                console.print(f"  [cyan]🖥 Server:[/cyan] {server_detected}")
+            if laravel_data.get('xsrf_token_detected'):
+                console.print(f"  [green]✅ XSRF-TOKEN Cookie:[/green] Detected (Laravel confirmed)")
+
+            # Coolify Detection
+            coolify = laravel_data.get('coolify', {})
+            if coolify.get('detected'):
+                inds = coolify.get('indicators', [])
+                ind_str = ', '.join(inds) if inds else 'detected'
+                console.print(f"  [yellow]🐳 Coolify:[/yellow] Detected ({ind_str})")
+                health = coolify.get('health_data', {})
+                if health:
+                    health_str = json.dumps(health)[:100]
+                    console.print(f"    [dim]/api/v1/health:[/dim] {health_str}")
+
             # Routes & Inertia
             if laravel_data.get('routes_exposed'):
                 console.print(f"  [green]🛣️ Routes:[/green] {len(laravel_data.get('routes', []))} endpoints exposed via window.routes")
@@ -1475,6 +1495,21 @@ class NexusREC:
             if leaks:
                 for leak in leaks:
                     console.print(f"  [yellow]⚠ Leak:[/yellow] {leak}")
+
+            api_chunks = nextjs_data.get('api_routes_from_chunks', [])
+            if api_chunks:
+                console.print(f"  [green]🔄 API Routes from JS Chunks:[/green] {len(api_chunks)} found")
+                for ac in api_chunks[:8]:
+                    console.print(f"    [dim]- {ac}[/dim]")
+                if len(api_chunks) > 8:
+                    console.print(f"    [dim]... and {len(api_chunks)-8} more[/dim]")
+
+            backend_proxy = nextjs_data.get('backend_proxy', [])
+            if backend_proxy:
+                console.print(f"  [yellow]🔁 Backend Proxy Patterns:[/yellow] {len(backend_proxy)}")
+                for bp in backend_proxy:
+                    st = bp.get('status', bp.get('source', '?'))
+                    console.print(f"    [dim]{bp['path']}[/dim] ({st})")
 
         # ── Supabase RLS Testing ─────────────────────────
         supabase_rls = self.results.get('supabase_rls', {})

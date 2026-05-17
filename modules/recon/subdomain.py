@@ -54,6 +54,7 @@ class SubdomainRecon:
                 'api-backend', 'server-api', 'api-server', 'backend-svc',
                 'svc', 'services', 'internal-api', 'private',
                 'rest-api', 'rest', 'graphql-api',
+                'student', 'teacher',
             ]
         found = []
         not_done = set()

@@ -325,6 +325,60 @@ class LaravelRecon:
             pass
         return False
 
+    def detect_server(self):
+        """Detect nginx server header and other infrastructure."""
+        try:
+            r = requests.get(self.target_url, timeout=10,
+                headers={'User-Agent': 'Mozilla/5.0'})
+            server = r.headers.get('Server', '')
+            if 'nginx' in server.lower():
+                self.results['server'] = 'nginx'
+            elif 'apache' in server.lower():
+                self.results['server'] = 'apache'
+            else:
+                self.results['server'] = server or 'unknown'
+            xsrf_cookie = any(c.name == 'XSRF-TOKEN' for c in r.cookies)
+            if xsrf_cookie:
+                self.results['xsrf_token_detected'] = True
+                self.results['laravel_detected'] = True
+        except:
+            pass
+        return self.results
+
+    def detect_coolify(self):
+        """Detect Coolify deployment platform."""
+        findings = {'detected': False}
+        try:
+            r = requests.get(self.target_url, timeout=10,
+                headers={'User-Agent': 'Mozilla/5.0'})
+            set_cookie = r.headers.get('Set-Cookie', '')
+            if 'coolify_session' in set_cookie:
+                findings['detected'] = True
+                findings['indicators'] = findings.get('indicators', [])
+                findings['indicators'].append('coolify_session_cookie')
+            try:
+                health_r = requests.get(
+                    f"{self.target_url}/api/v1/health", timeout=8,
+                    headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+                if health_r.status_code == 200:
+                    try:
+                        data = health_r.json()
+                        findings['detected'] = True
+                        findings['health_data'] = data
+                        findings['indicators'] = findings.get('indicators', [])
+                        findings['indicators'].append('/api/v1/health endpoint')
+                    except:
+                        findings['health_status'] = health_r.status_code
+            except:
+                pass
+            for cookie in r.cookies:
+                if cookie.name == 'XSRF-TOKEN':
+                    findings['xsrf_token_detected'] = True
+        except:
+            pass
+        self.results['coolify'] = findings
+        return findings
+
     def check_cve_vulnerabilities(self):
         vulns = []
         try:
@@ -363,4 +417,6 @@ class LaravelRecon:
         self.detect_openresty()
         self.scan_sensitive_routes()
         self.check_cve_vulnerabilities()
+        self.detect_server()
+        self.detect_coolify()
         return self.results

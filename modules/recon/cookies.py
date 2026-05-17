@@ -2,6 +2,8 @@ import requests
 import re
 import base64
 import json
+import hmac
+import hashlib
 import urllib.parse
 
 
@@ -76,6 +78,8 @@ class CookieRecon:
             findings['total_cookies'] = len(parsed)
         except:
             pass
+        if findings.get('potential_jwt'):
+            self._analyze_jwt_tokens(findings)
         self.results['cookies'] = findings
         return findings
 
@@ -92,19 +96,30 @@ class CookieRecon:
                     padded_p = payload_b64 + '=' * (4 - len(payload_b64) % 4) if len(payload_b64) % 4 else payload_b64
                     payload = base64.urlsafe_b64decode(padded_p)
                     payload_json = json.loads(payload)
-                    findings['potential_jwt'].append({
+                    raw_token = f"{header_b64}.{payload_b64}.{sig}"
+                    cracked_secret = self._crack_jwt_hs256(raw_token)
+                    entry = {
                         'cookie_name': name,
                         'header': header_json,
                         'payload': payload_json,
+                        'header_b64': header_b64,
+                        'payload_b64': payload_b64,
                         'signature': sig[:20] + '...',
+                        'signature_full': sig,
+                        '_raw_token': raw_token,
                         'has_user_pass': 'user' in payload_json or 'pass' in payload_json or 'password' in payload_json or 'username' in payload_json,
                         'has_cred_fields': any(k in payload_json for k in ['user', 'pass', 'password', 'username', 'token', 'secret', 'key', 'email']),
-                    })
+                    }
+                    if cracked_secret:
+                        entry['hs256_cracked'] = True
+                        entry['hs256_secret'] = cracked_secret
+                    findings['potential_jwt'].append(entry)
                     if any(k in payload_json for k in ['user', 'pass', 'password', 'username']):
                         findings['credential_leak'].append({
                             'cookie_name': name,
                             'type': 'JWT credential in cookie payload',
                             'decoded_payload_preview': {k: v for k, v in list(payload_json.items())[:6]},
+                            'cracked_secret': cracked_secret,
                         })
             except:
                 pass
@@ -135,6 +150,45 @@ class CookieRecon:
                     break
         except:
             pass
+
+    COMMON_JWT_SECRETS = [
+        'secret', 'supersecret', 'password', '123456', 'admin',
+        'changeme', 'secretkey', 'secret123', 'key', 'token',
+        'jwt_secret', 'jwt', 'node', 'express', 'nextjs',
+        'laravel', 'django', 'flask', 'rails', 'pass',
+        'test', 'dev', 'staging', 'production', 'prod',
+        'debug', 'default', 'insecure', 'weak', 'qwerty',
+        'abc123', 'letmein', 'monkey', 'dragon', 'master',
+        'access', 'private', 'public', 'auth', 'bearer',
+        'xsrf', 'csrf', 'session', 'cookie', 'api_key',
+        'supabase', 'firebase', 'stripe', 'paypal',
+    ]
+
+    def _crack_jwt_hs256(self, jwt_token):
+        parts = jwt_token.split('.')
+        if len(parts) != 3:
+            return None
+        header_b64, payload_b64, sig = parts
+        msg = f"{header_b64}.{payload_b64}".encode()
+        for secret in self.COMMON_JWT_SECRETS:
+            try:
+                expected = base64.urlsafe_b64encode(
+                    hmac.new(secret.encode(), msg, hashlib.sha256).digest()
+                ).rstrip(b'=').decode()
+                if expected == sig:
+                    return secret
+            except Exception:
+                pass
+        return None
+
+    def _analyze_jwt_tokens(self, findings):
+        for j in findings.get('potential_jwt', []):
+            token_str = f"{j.get('header_b64','')}.{j.get('payload_b64','')}.{j.get('signature','')}"
+            full_token = j.get('_raw_token', '')
+            cracked = self._crack_jwt_hs256(full_token or token_str)
+            if cracked:
+                j['hs256_cracked'] = True
+                j['hs256_secret'] = cracked
 
     def analyze_csrf(self):
         findings = {}

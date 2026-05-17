@@ -3,6 +3,7 @@ import re
 import json
 import random
 import time
+from urllib.parse import urljoin
 
 USER_AGENTS = [
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -141,6 +142,74 @@ class NextJSRecon:
         self.results['leaks'] = leaks
         return leaks
 
+    def discover_api_from_chunks(self):
+        """Extract API routes from Next.js JS chunks — fetch() calls and route defs."""
+        api_routes = set()
+        try:
+            r = self._get(self.target_url)
+            html = r.text
+            js_chunks = re.findall(r'src=["\']([^"\']*_next/static/chunks/[^"\']+)["\']', html)
+            js_chunks += re.findall(r'src=["\']([^"\']*_next/static/[^"\']+\.js)["\']', html)
+            for js in set(js_chunks):
+                js_url = urljoin(self.target_url, js)
+                try:
+                    content = self._get(js_url, timeout=10).text
+                    fetches = re.findall(r'fetch\(["\']([^"\']+)["\']\)', content)
+                    for f in fetches:
+                        if '/api/' in f.lower():
+                            api_routes.add(f)
+                    routes_def = re.findall(r'["\'](/[a-zA-Z0-9/_-]+)["\']\s*:\s*\{', content)
+                    for rd in routes_def:
+                        if '/api/' in rd.lower():
+                            api_routes.add(rd)
+                    axios_refs = re.findall(r'axios\.\w+\(["\']([^"\']+)["\']\)', content)
+                    for a in axios_refs:
+                        if '/api/' in a.lower():
+                            api_routes.add(a)
+                except:
+                    pass
+        except:
+            pass
+        self.results['api_routes_from_chunks'] = sorted(api_routes)
+        return list(api_routes)
+
+    def detect_backend_proxy(self):
+        """Detect /api/backend/ proxy patterns in Next.js apps."""
+        findings = []
+        proxy_paths = [
+            '/api/backend/', '/api/backend', '/api/proxy/', '/api/proxy',
+            '/api/gateway/', '/api/gateway', '/api/bkapi/', '/api/bkapi',
+            '/backend/', '/backend/api/', '/api/internal/',
+        ]
+        for path in proxy_paths:
+            try:
+                r = self._get(f"{self.target_url}{path}", timeout=8, allow_redirects=False)
+                if r.status_code not in [404, 502, 503]:
+                    findings.append({
+                        'path': path,
+                        'status': r.status_code,
+                        'length': len(r.content),
+                        'content_type': r.headers.get('Content-Type', ''),
+                    })
+            except:
+                pass
+        try:
+            r = self._get(self.target_url)
+            html = r.text
+            proxy_refs = re.findall(r'["\'](/api/backend/[^"\']+)["\']', html)
+            proxy_refs += re.findall(r'["\'](/backend/[^"\']+)["\']', html)
+            if proxy_refs:
+                for ref in set(proxy_refs):
+                    findings.append({
+                        'path': ref,
+                        'source': 'js_reference',
+                        'status': 'referenced_in_code',
+                    })
+        except:
+            pass
+        self.results['backend_proxy'] = findings
+        return findings
+
     def run_all(self):
         self.detect_version()
         self.discover_routes()
@@ -148,4 +217,6 @@ class NextJSRecon:
         self.results['middleware_bypass'] = bypass
         self.results['middleware_details'] = details
         self.check_ssg_ssr_leaks()
+        self.discover_api_from_chunks()
+        self.detect_backend_proxy()
         return self.results
