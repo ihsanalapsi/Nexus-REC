@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nexus-rec"
-version = "1.0.0"
+version = "1.0.1"
 description = "Intelligent Reconnaissance & Vulnerability Assessment Framework"
 readme = "README.md"
 license = {text = "MIT"}
@@ -41,6 +41,9 @@ Issues = "https://github.com/ihsanalapsi/Nexus-REC/issues"
 
 [project.scripts]
 nexus-rec = "nexus_rec:main"
+
+[tool.setuptools]
+py-modules = ["nexus_rec"]
 
 [tool.setuptools.packages.find]
 include = ["modules*"]
