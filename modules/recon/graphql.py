@@ -1,7 +1,24 @@
 import requests
 import json
 import hashlib
+import re
 from urllib.parse import urljoin
+
+
+COMMON_MUTATION_NAMES = [
+    'signIn', 'login', 'authenticate', 'authorize', 'createSession',
+    'startSession', 'generateToken', 'getToken', 'signInWithPassword',
+    'passwordSignIn', 'emailSignIn', 'loginUser', 'userLogin',
+    'signInUser', 'authenticateUser', 'auth', 'loginWithEmail',
+    'tokenAuth', 'registerUser', 'register', 'signUp', 'createUser',
+]
+
+COMMON_QUERY_NAMES = [
+    'me', 'users', 'user', 'products', 'product', 'orders', 'order',
+    'payments', 'payment', 'settings', 'config', 'countries', 'categories',
+    'myProduct', 'myProducts', 'myStore', 'myWallet', 'myOrders',
+]
+
 
 class GraphQLRecon:
     def __init__(self, target_url):
@@ -40,6 +57,7 @@ class GraphQLRecon:
             '/graphql/v1', '/graphql/v2', '/gql',
             '/graphql.json', '/schema.json', '/graphql/schema.json',
         ]
+
         endpoints = []
         for path in common_paths:
             url = urljoin(self.target_url, path)
@@ -62,6 +80,37 @@ class GraphQLRecon:
                     })
             except:
                 pass
+
+        # Also try subdomain-based GQL endpoints (api.*.com/graphql)
+        domain = self.target_url.split('//')[-1].split('/')[0]
+        parts = domain.split('.')
+        if len(parts) >= 2:
+            base_domain = '.'.join(parts[-2:]) if len(parts) >= 2 else domain
+            gql_subdomains = [
+                f'https://api.{base_domain}/graphql',
+                f'https://gql.{base_domain}/graphql',
+                f'https://graphql.{base_domain}/graphql',
+                f'https://api.{base_domain}/api/graphql',
+            ]
+            for url in gql_subdomains:
+                try:
+                    r = requests.post(url,
+                        json={'query': '{__typename}'},
+                        headers={'Content-Type': 'application/json'},
+                        timeout=8)
+                    data = r.json()
+                    is_gql = 'data' in data or 'errors' in data
+                    if is_gql:
+                        endpoints.append({
+                            'url': url, 'status': r.status_code,
+                            'content_type': r.headers.get('Content-Type', ''),
+                            'is_graphql': is_gql,
+                            'size': len(r.content),
+                            'source': 'subdomain_probe',
+                        })
+                except:
+                    pass
+
         self.results['endpoints'] = endpoints
         return endpoints
 
@@ -123,11 +172,113 @@ class GraphQLRecon:
                         results[url] = {'introspection_enabled': False}
                 else:
                     results[url] = {'introspection_enabled': False,
-                                    'status': r.status_code}
+                                    'status': r.status_code,
+                                    'body_preview': r.text[:200]}
             except:
                 results[url] = {'introspection_enabled': False, 'error': True}
         self.results['introspection'] = results
         return results
+
+    def test_error_based_schema_leak(self):
+        """Use error messages to discover schema fields when introspection is disabled."""
+        leak_results = {}
+        eps = self.results.get('endpoints', [])
+        for ep in eps:
+            url = ep['url']
+            if not ep.get('is_graphql', False):
+                continue
+
+            discovered_queries = []
+            discovered_mutations = []
+            discovered_types = {}
+
+            # Try common queries to trigger field suggestions
+            for qname in COMMON_QUERY_NAMES:
+                try:
+                    r = requests.post(url,
+                        json={'query': f'{{{qname}{{id}}}}'},
+                        headers={'Content-Type': 'application/json',
+                                 'Origin': self.target_url},
+                        timeout=10)
+                    data = r.json()
+                    if 'errors' in data:
+                        err = data['errors'][0]['message']
+                        # "Cannot query field" reveals the type/field name
+                        # "Did you mean" reveals field suggestions
+                        if 'Cannot query field' in err:
+                            query_type = re.search(r'field "(\w+)" on type "(\w+)"', err)
+                            if query_type:
+                                discovered_queries.append({
+                                    'name': qname,
+                                    'error': err,
+                                    'suggestion': query_type.group(1),
+                                    'type': query_type.group(2),
+                                })
+                        elif 'Unauthorized' in err:
+                            discovered_queries.append({
+                                'name': qname,
+                                'requires_auth': True,
+                            })
+                        elif 'is required' in err:
+                            discovered_queries.append({
+                                'name': qname,
+                                'requires_args': True,
+                                'error': err,
+                            })
+                    else:
+                        discovered_queries.append({
+                            'name': qname,
+                            'public': True,
+                        })
+                except:
+                    pass
+
+            # Try common mutations
+            for mname in COMMON_MUTATION_NAMES:
+                try:
+                    r = requests.post(url,
+                        json={'query': f'mutation{{{mname}(email:"test" password:"test"){{id}}}}'},
+                        headers={'Content-Type': 'application/json',
+                                 'Origin': self.target_url},
+                        timeout=10)
+                    data = r.json()
+                    if 'errors' in data:
+                        err = data['errors'][0]['message']
+                        if 'Cannot query field' in err:
+                            pass  # mutation doesn't exist
+                        elif 'Unauthorized' in err:
+                            discovered_mutations.append({
+                                'name': mname,
+                                'requires_auth': True,
+                            })
+                        elif 'is required' in err or 'Unknown argument' in err:
+                            discovered_mutations.append({
+                                'name': mname,
+                                'exists': True,
+                                'error': err,
+                            })
+                        else:
+                            discovered_mutations.append({
+                                'name': mname,
+                                'exists': True,
+                                'error': err,
+                            })
+                    else:
+                        discovered_mutations.append({
+                            'name': mname,
+                            'public': True,
+                        })
+                except:
+                    pass
+
+            if discovered_queries or discovered_mutations:
+                leak_results[url] = {
+                    'queries_discovered': discovered_queries[:30],
+                    'mutations_discovered': discovered_mutations[:30],
+                }
+
+        self.results['error_schema_leak'] = leak_results
+        return leak_results
 
     def test_batch_queries(self):
         batch_results = {}
@@ -156,8 +307,55 @@ class GraphQLRecon:
         self.results['batch_queries'] = batch_results
         return batch_results
 
+    def test_csrf_protection(self):
+        """Test if CSRF protection (apollo-require-preflight) is active."""
+        csrf_results = {}
+        eps = self.results.get('endpoints', [])
+        for ep in eps:
+            url = ep['url']
+            if not ep.get('is_graphql', False):
+                continue
+
+            tests = {
+                'json_no_origin': requests.post(url,
+                    json={'query': '{__typename}'},
+                    headers={'Content-Type': 'application/json'},
+                    timeout=10),
+                'json_with_origin': requests.post(url,
+                    json={'query': '{__typename}'},
+                    headers={'Content-Type': 'application/json',
+                             'Origin': self.target_url},
+                    timeout=10),
+                'form_urlencoded': requests.post(url,
+                    data={'query': '{__typename}'},
+                    headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                    timeout=10),
+            }
+
+            csrf_findings = {}
+            for test_name, response in tests.items():
+                try:
+                    data = response.json()
+                    csrf_findings[test_name] = {
+                        'status': response.status_code,
+                        'blocked': 'CSRF' in str(data) or 'csrf' in str(data).lower(),
+                        'response': str(data)[:200],
+                    }
+                except:
+                    csrf_findings[test_name] = {
+                        'status': response.status_code,
+                        'blocked': True,
+                        'response': response.text[:200],
+                    }
+
+            csrf_results[url] = csrf_findings
+        self.results['csrf_protection'] = csrf_results
+        return csrf_results
+
     def run_all(self):
         self.find_endpoints()
         self.test_introspection()
+        self.test_error_based_schema_leak()
         self.test_batch_queries()
+        self.test_csrf_protection()
         return self.results

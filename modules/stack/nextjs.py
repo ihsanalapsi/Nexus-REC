@@ -51,7 +51,19 @@ class NextJSRecon:
             except:
                 self.results['detected'] = False
                 return self.results
+        headers = self._initial_headers
+
         self.results['detected'] = '_next' in text or '__NEXT_DATA__' in text
+
+        if headers:
+            x_powered = headers.get('x-powered-by', '')
+            if 'Next.js' in x_powered:
+                self.results['detected'] = True
+                self.results['x_powered_by'] = x_powered
+            x_mw_rewrite = headers.get('x-middleware-rewrite', '')
+            if x_mw_rewrite:
+                self.results['middleware_rewrite'] = x_mw_rewrite
+
         if self.results['detected']:
             build_id = re.search(r'"buildId":"([^"]+)"', text)
             if build_id:
@@ -59,13 +71,27 @@ class NextJSRecon:
             version = re.search(r'Next\.js\s+v?(\d+\.\d+\.\d+)', text, re.IGNORECASE)
             if version:
                 self.results['version'] = version.group(1)
+
+            turbopack = re.search(r'turbopack[-_][a-f0-9]+', text, re.IGNORECASE)
+            if turbopack:
+                self.results['bundler'] = 'Turbopack'
+            elif re.search(r'webpack', text, re.IGNORECASE):
+                self.results['bundler'] = 'Webpack'
+
             next_data = re.search(r'__NEXT_DATA__\s*=\s*({.*?});', text, re.DOTALL)
             if next_data:
                 try:
                     data = json.loads(next_data.group(1))
                     self.results['page'] = data.get('page', '')
                     self.results['runtime_config'] = data.get('runtimeConfig', {})
-                    self.results['props'] = str(data.get('props', {}))[:500]
+                    props = data.get('props', {})
+                    self.results['props'] = str(props)[:500]
+                    pp = props.get('pageProps', {})
+                    if pp:
+                        self.results['pageProps_keys'] = list(pp.keys())
+                        sentry = pp.get('_sentryTraceData') or pp.get('_sentryBaggage')
+                        if sentry:
+                            self.results['sentry_detected'] = True
                 except:
                     pass
             rsc = re.search(r'__RSC|RSC:', text)
@@ -74,6 +100,21 @@ class NextJSRecon:
             server_actions = re.findall(r'_next/server-actions/[^"\']+', text)
             if server_actions:
                 self.results['server_actions'] = list(set(server_actions))
+
+            locale = re.search(r'NEXT_LOCALE[=;]([a-z-]+)', text + str(headers))
+            if locale:
+                self.results['locale'] = locale.group(1)
+
+            static_subdomains = re.findall(r'(https?://[^"\']*?-static\.[^"\']*?\.com)[^"\']*?/_next/static', text)
+            if static_subdomains:
+                self.results['static_subdomains'] = list(set(static_subdomains))
+
+            link_header = headers.get('link', '') if headers else ''
+            if link_header:
+                preloads = re.findall(r'<([^>]+)>;\s*rel=preload', link_header)
+                if preloads:
+                    self.results['preloaded_assets'] = len(preloads)
+
         return self.results
 
     def discover_routes(self):

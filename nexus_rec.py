@@ -1042,6 +1042,33 @@ class NexusREC:
                 if status.get('sensitive_count', 0) > 0:
                     console.print(f"  [bold red]Sensitive types exposed: {status['sensitive_count']}[/bold red]")
 
+        # GraphQL Error-Based Schema Leak
+        err_leak = gql_data.get('error_schema_leak', {})
+        if err_leak:
+            for url, leaks in err_leak.items():
+                queries = leaks.get('queries_discovered', [])
+                mutations = leaks.get('mutations_discovered', [])
+                if queries or mutations:
+                    console.print(f"\n[bold yellow]⚡ GraphQL Schema Harvested via Validation Errors at:[/bold yellow] {url}")
+                    if queries:
+                        q_str = ', '.join(q['name'] for q in queries[:15])
+                        console.print(f"  [cyan]Queries discovered ({len(queries)}):[/cyan] {q_str}")
+                    if mutations:
+                        m_str = ', '.join(m['name'] for m in mutations[:15])
+                        console.print(f"  [cyan]Mutations discovered ({len(mutations)}):[/cyan] {m_str}")
+
+        # GraphQL CSRF Protection
+        csrf_prot = gql_data.get('csrf_protection', {})
+        if csrf_prot:
+            for url, tests in csrf_prot.items():
+                vuln_tests = []
+                for test_name, res in tests.items():
+                    if not res.get('blocked', True):
+                        vuln_tests.append(test_name)
+                if vuln_tests:
+                    console.print(f"  [bold red]⚠ GraphQL CSRF Vulnerability at {url}![/bold red]")
+                    console.print(f"    Apollo Require Preflight / CSRF protection not active for: {', '.join(vuln_tests)}")
+
         vuln_data = self.results.get('vulnerabilities', {})
         total_vulns = sum(len(v) for v in vuln_data.values() if isinstance(v, list))
         homepage_len = self.results.get('basic', {}).get('content_length', 0)
@@ -1483,9 +1510,25 @@ class NexusREC:
             console.print("\n[bold magenta]💎 Next.js Insights:[/bold magenta]")
             if nextjs_data.get('version'):
                 console.print(f"  [cyan]🚀 Version:[/cyan] {nextjs_data['version']}")
+            if nextjs_data.get('bundler'):
+                console.print(f"  [cyan]📦 Bundler:[/cyan] {nextjs_data['bundler']}")
             if nextjs_data.get('build_id'):
                 console.print(f"  [dim]Build ID: {nextjs_data['build_id']}[/dim]")
+            if nextjs_data.get('x_powered_by'):
+                console.print(f"  [dim]X-Powered-By:[/dim] {nextjs_data['x_powered_by']}")
+            if nextjs_data.get('middleware_rewrite'):
+                console.print(f"  [yellow]🔄 Middleware Rewrite:[/yellow] {nextjs_data['middleware_rewrite']}")
+            if nextjs_data.get('locale'):
+                console.print(f"  [cyan]🌍 Default Locale:[/cyan] {nextjs_data['locale']}")
+            if nextjs_data.get('sentry_detected'):
+                console.print(f"  [cyan]🎯 Sentry Tracking:[/cyan] Detected on client-side")
+            if nextjs_data.get('preloaded_assets'):
+                console.print(f"  [cyan]⚡ Preloaded Assets:[/cyan] {nextjs_data['preloaded_assets']} assets preloaded in Link header")
             
+            static_subs = nextjs_data.get('static_subdomains', [])
+            if static_subs:
+                console.print(f"  [cyan]☁️ Static Asset Subdomains ({len(static_subs)}):[/cyan] {', '.join(static_subs)}")
+
             if nextjs_data.get('middleware_bypass'):
                 details = nextjs_data.get('middleware_details', {})
                 console.print(f"  [bold red]⚠ CRITICAL: Middleware Bypass Detected![/bold red]")
