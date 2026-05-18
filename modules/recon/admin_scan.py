@@ -10,6 +10,8 @@ class AdminScanRecon:
         self.target_url = target_url.rstrip('/')
         self.domain = target_url.split("//")[-1].split("/")[0]
         self.results = {}
+        self.stealth = False
+        self.max_workers = 20
 
     def find_admin_subdomains(self):
         admin_prefixes = [
@@ -44,7 +46,7 @@ class AdminScanRecon:
         ]
 
         findings = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, 20)) as executor:
             futures = {}
             for prefix in admin_prefixes:
                 fqdn = f'{prefix}.{self.domain}'

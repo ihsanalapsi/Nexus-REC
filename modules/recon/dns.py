@@ -10,6 +10,8 @@ class DNSRecon:
         self.target_url = target_url.rstrip('/')
         self.domain = target_url.split("//")[-1].split("/")[0]
         self.results = {}
+        self.stealth = False
+        self.max_workers = 10
 
     def detect_wildcard_dns(self):
         findings = {
@@ -125,7 +127,7 @@ class DNSRecon:
                     sock.close()
                 return None
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, 10)) as ex:
                 futures = [ex.submit(_check_port, p) for p in ports]
                 for f in concurrent.futures.as_completed(futures):
                     r = f.result()

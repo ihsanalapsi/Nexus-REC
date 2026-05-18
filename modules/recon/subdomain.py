@@ -10,6 +10,8 @@ class SubdomainRecon:
         self.target_url = target_url.rstrip('/')
         self.domain = target_url.split("//")[-1].split("/")[0]
         self.results = {}
+        self.stealth = False
+        self.max_workers = 30
 
     def enumerate_subdomains(self, wordlist=None):
         if wordlist is None:
@@ -58,7 +60,8 @@ class SubdomainRecon:
             ]
         found = []
         not_done = set()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+        workers = min(self.max_workers, 30)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {}
             for sub in wordlist:
                 fqdn = f"{sub}.{self.domain}"

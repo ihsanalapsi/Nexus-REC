@@ -9,6 +9,8 @@ class DNSDetritusRecon:
         self.target_url = target_url.rstrip('/')
         self.domain = target_url.split("//")[-1].split("/")[0]
         self.results = {}
+        self.stealth = False
+        self.max_workers = 5
 
     def check_cloudflare_legacy(self):
         cf_octets = {
@@ -181,7 +183,7 @@ class DNSDetritusRecon:
         return findings
 
     def run_all(self):
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, 5)) as executor:
             f1 = executor.submit(self.check_cloudflare_legacy)
             f2 = executor.submit(self.check_non_cloudflare_legacy)
             f3 = executor.submit(self.check_mx_detritus)

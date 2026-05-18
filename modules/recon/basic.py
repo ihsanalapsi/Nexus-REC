@@ -41,6 +41,8 @@ class BasicRecon:
         self._wappalyzer = WappalyzerEngine()
         self._session = requests.Session()
         self._retries = 3
+        self.stealth = False
+        self.request_delay = 0
 
     def _get(self, url, **kwargs):
         headers = BROWSER_HEADERS.copy()
@@ -49,6 +51,8 @@ class BasicRecon:
         kwargs.setdefault('timeout', 15)
         for attempt in range(self._retries):
             try:
+                if self.request_delay:
+                    time.sleep(self.request_delay)
                 r = self._session.get(url, **kwargs)
                 if r.status_code not in [429, 503]:
                     return r

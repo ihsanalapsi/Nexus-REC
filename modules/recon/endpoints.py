@@ -2,6 +2,7 @@ import requests
 import re
 import hashlib
 import concurrent.futures
+import time
 from urllib.parse import urljoin
 
 
@@ -12,6 +13,9 @@ class EndpointRecon:
         self.results = {}
         self._homepage_html = None
         self._homepage_length = None
+        self.stealth = False
+        self.max_workers = 12
+        self.request_delay = 0
         self._session = requests.Session()
         self._session.headers.update({'User-Agent': 'Mozilla/5.0'})
 
@@ -45,6 +49,8 @@ class EndpointRecon:
         kwargs.setdefault('allow_redirects', False)
         kwargs.setdefault('timeout', timeout)
         try:
+            if self.request_delay:
+                time.sleep(self.request_delay)
             return self._session.request(method, url, **kwargs)
         except:
             return None
@@ -75,7 +81,7 @@ class EndpointRecon:
                     }
             return None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, 8)) as ex:
             for r in ex.map(_check, login_paths):
                 if r:
                     findings.append(r)
@@ -125,7 +131,7 @@ class EndpointRecon:
                     }
             return None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, 12)) as ex:
             futures = [ex.submit(_check_path, p) for p in targets]
             for f in concurrent.futures.as_completed(futures):
                 r = f.result()
@@ -154,7 +160,7 @@ class EndpointRecon:
                 }
             return None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=7) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, 7)) as ex:
             for r in ex.map(_check, api_paths):
                 if r:
                     findings.append(r)
@@ -221,7 +227,7 @@ class EndpointRecon:
                 })
             return None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, 5)) as ex:
             futures = {ex.submit(_check_platform, p, i): p for p, i in platform_checks.items()}
             for f in concurrent.futures.as_completed(futures):
                 r = f.result()
@@ -268,7 +274,7 @@ class EndpointRecon:
             return None
 
         all_tasks = [(cat, p) for cat, plist in paths.items() for p in plist]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.max_workers, 8)) as ex:
             futures = {ex.submit(_check_path, c, p): c for c, p in all_tasks}
             for f in concurrent.futures.as_completed(futures):
                 r = f.result()
