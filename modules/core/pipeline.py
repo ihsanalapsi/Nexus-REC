@@ -84,6 +84,15 @@ STEP_DEFINITIONS = [
         skip_reason="Laravel was not detected.",
     ),
     StepDefinition(
+        "atlassian",
+        "Atlassian Stack Recon",
+        registry_key="Atlassian",
+        stack="Atlassian",
+        http_heavy=True,
+        reason="Atlassian product (Jira/Confluence/Bitbucket) detected; unauthenticated access checks are relevant.",
+        skip_reason="No Atlassian product (Jira/Confluence/Bitbucket) was detected.",
+    ),
+    StepDefinition(
         "vuln",
         "Vulnerability Scanner",
         result_key="vulnerabilities",

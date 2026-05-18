@@ -27,4 +27,5 @@ MODULES_REGISTRY = {
 STACK_MODULES = {
     'Next.js': 'modules.stack.nextjs.NextJSRecon',
     'Laravel': 'modules.stack.laravel.LaravelRecon',
+    'Atlassian': 'modules.stack.atlassian.AtlassianRecon',
 }

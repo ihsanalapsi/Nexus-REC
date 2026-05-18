@@ -258,6 +258,12 @@ class NexusREC:
         else:
             skip("laravel", STEP_BY_KEY["laravel"].skip_reason)
 
+        # ── Atlassian ───────────────────────────────
+        if detected("Atlassian", "Atlassian Jira", "JIRA", "Confluence", "Bitbucket"):
+            add("atlassian", STEP_BY_KEY["atlassian"].reason)
+        else:
+            skip("atlassian", STEP_BY_KEY["atlassian"].skip_reason)
+
         if detected("Supabase"):
             add("supabase_rls", STEP_BY_KEY["supabase_rls"].reason)
             add("supabase_rpc", STEP_BY_KEY["supabase_rpc"].reason)
@@ -709,6 +715,29 @@ class NexusREC:
                 run_registered_step('laravel', registry_key='Laravel')
             elif should_run('laravel'):
                 _skip("laravel")
+
+            atlassian_techs = {"Atlassian Jira", "JIRA", "Confluence", "Bitbucket", "Atlassian"}
+            if atlassian_techs & set(tech_names) and should_run('atlassian'):
+                def configure_atlassian(mod):
+                    if hasattr(mod, 'set_initial_response'):
+                        basic_html = self.results.get('basic', {}).get('_html', '')
+                        raw_headers = self.results.get('basic', {}).get('headers', {}).get('_raw_headers', {})
+                        if basic_html:
+                            mod.set_initial_response(basic_html, raw_headers)
+                run_registered_step('atlassian', registry_key='Atlassian', configure=configure_atlassian)
+                if 'Jira' in str(tech_names):
+                    atl_results = self.results.get('atlassian', {})
+                    jira = atl_results.get('jira', {})
+                    anon = atl_results.get('anonymous_access', {})
+                    if anon:
+                        progress.console.print(f"  [bold red]⚠ Jira anonymous access detected: {len(anon)} accessible endpoint(s)[/bold red]")
+                        for ep, info in list(anon.items())[:3]:
+                            progress.console.print(f"    [dim]→ {ep}: {info.get('data','')[:80]}[/dim]")
+                    server_info = jira.get('/rest/api/2/serverInfo', {})
+                    if server_info.get('version'):
+                        progress.console.print(f"  [yellow]Jira {server_info['version']} ({server_info.get('deployment','?')}) exposed[/yellow]")
+            elif should_run('atlassian'):
+                _skip("atlassian")
 
             # ── STEP 7: Vuln Scanner ─────────────────────
             if should_run('vuln'):

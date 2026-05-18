@@ -1027,3 +1027,48 @@ def display_summary(results, domain, console):
                     redirect[:38],
                 )
             console.print(path_table)
+
+    # ── Atlassian Stack Recon ───────────────────────
+    atlassian_data = results.get('atlassian', {})
+    if atlassian_data and atlassian_data.get('detected'):
+        console.print("\n[bold magenta]🔷 Atlassian Stack Recon:[/bold magenta]")
+        jira = atlassian_data.get('jira', {})
+        server_info = jira.get('/rest/api/2/serverInfo', {})
+        if server_info.get('version'):
+            console.print(f"  [cyan]🔄 Jira:[/cyan] {server_info['version']} ({server_info.get('deployment','?')})")
+            if server_info.get('scm'):
+                console.print(f"  [dim]Build:[/dim] {server_info.get('build')} | SCM: {server_info.get('scm')}")
+
+        anon = atlassian_data.get('anonymous_access', {})
+        if anon:
+            console.print(f"  [bold red]⚠ Anonymous Access: {len(anon)} endpoint(s)[/bold red]")
+            for ep, info in list(anon.items())[:5]:
+                status = info.get('status', '?')
+                data_preview = str(info.get('data', ''))[:80]
+                console.print(f"    [dim]{ep}[/dim] ({status}) → {data_preview}")
+
+        jira_login = jira.get('/login.jsp', {})
+        if jira_login.get('meta_version'):
+            console.print(f"  [dim]Meta version: {jira_login['meta_version']}[/dim]")
+
+        dashboard = jira.get('/secure/Dashboard.jspa', {})
+        if dashboard.get('leaked_project_id') or dashboard.get('confluence_urls'):
+            console.print(f"  [yellow]🔑 Dashboard Leaks:[/yellow]")
+            if dashboard.get('leaked_project_id'):
+                console.print(f"    [dim]Project ID: {dashboard['leaked_project_id']}[/dim]")
+            if dashboard.get('confluence_urls'):
+                for cu in dashboard['confluence_urls'][:3]:
+                    console.print(f"    [dim]Confluence: {cu}[/dim]")
+            if dashboard.get('x_username'):
+                console.print(f"    [dim]User: {dashboard['x_username']}[/dim]")
+
+        azure = atlassian_data.get('azure_app_proxy', {})
+        if azure.get('detected'):
+            console.print(f"  [cyan]☁️ Azure App Proxy:[/cyan] Tenant {azure.get('tenant_id','')[:12]}...")
+            console.print(f"    [dim]DC: {azure.get('data_center','?')} | Service: {azure.get('service_name','?')}[/dim]")
+
+        saml = atlassian_data.get('saml_sso', {})
+        if saml.get('saml_request_found'):
+            console.print(f"  [yellow]🔐 SAML SSO:[/yellow] {saml.get('saml_endpoint','?')}")
+            if saml.get('environment'):
+                console.print(f"    [dim]Env: {saml['environment']} | Service: {saml.get('service','?')}[/dim]")

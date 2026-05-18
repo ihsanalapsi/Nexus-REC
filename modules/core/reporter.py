@@ -243,6 +243,54 @@ def generate_markdown_report(results, domain):
                 lines.append(f"- *... and {len(dynamic_routes)-10} more*")
             lines.append("")
 
+    atlassian_data = results.get('atlassian', {})
+    if _completed(metadata, 'atlassian') and atlassian_data.get('detected'):
+        lines += ["---", "", f"## {section_num}. Atlassian Stack Recon", ""]
+        section_num += 1
+        jira = atlassian_data.get('jira', {})
+        server_info = jira.get('/rest/api/2/serverInfo', {})
+        if server_info.get('version'):
+            lines += [
+                f"- **Jira Version:** {server_info['version']} ({server_info.get('deployment','?')})",
+                f"- **Build:** {server_info.get('build')}",
+                f"- **SCM:** {server_info.get('scm','N/A')}",
+                f"- **Build Date:** {server_info.get('build_date','N/A')}",
+                "",
+            ]
+        anon = atlassian_data.get('anonymous_access', {})
+        if anon:
+            lines.append(f"### Anonymous Access ({len(anon)} endpoints)")
+            lines.append("")
+            for ep, info in anon.items():
+                status = info.get('status', '?')
+                preview = str(info.get('data', ''))[:120]
+                lines.append(f"- `{ep}` (HTTP {status}): {preview}")
+            lines.append("")
+        dashboard = jira.get('/secure/Dashboard.jspa', {})
+        if dashboard.get('internal_message'):
+            lines.append("### Dashboard Content Leak")
+            lines.append("")
+            lines.append(f"> {dashboard['internal_message']}")
+            lines.append("")
+        if dashboard.get('leaked_project_id'):
+            lines.append(f"- **Leaked Project ID:** {dashboard['leaked_project_id']}")
+        if dashboard.get('confluence_urls'):
+            for cu in dashboard['confluence_urls']:
+                lines.append(f"- **Confluence URL:** {cu}")
+        azure = atlassian_data.get('azure_app_proxy', {})
+        if azure.get('detected'):
+            lines += ["", "### Azure App Proxy", ""]
+            lines.append(f"- **Tenant ID:** `{azure.get('tenant_id','')}`")
+            lines.append(f"- **Data Center:** {azure.get('data_center','')}")
+            lines.append(f"- **Service:** {azure.get('service_name','')}")
+        saml = atlassian_data.get('saml_sso', {})
+        if saml.get('saml_request_found'):
+            lines += ["", "### SAML SSO", ""]
+            lines.append(f"- **Endpoint:** {saml.get('saml_endpoint','')}")
+            if saml.get('environment'):
+                lines.append(f"- **Environment:** {saml['environment']}")
+        lines.append("")
+
     lines += [
         "---",
         "",
