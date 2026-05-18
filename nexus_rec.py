@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import requests
 import urllib3
 from datetime import datetime
 from rich.console import Console
@@ -14,6 +13,13 @@ from modules.core.config import (
 )
 from modules.core.cli import run_cli, validate_target
 from modules.core.module_loader import load_module
+from modules.core.pipeline import (
+    BASELINE_STEPS,
+    HTTP_HEAVY_STEPS,
+    STEP_BY_KEY,
+    STEP_TITLES,
+    planned_total,
+)
 from modules.core.reporter import save_scan_results
 from modules.core.summary import display_summary
 
@@ -216,19 +222,13 @@ class NexusREC:
             lowered = {str(t).lower() for t in tech_names + list(stack)}
             return any(name.lower() in lowered for name in names)
 
-        add("subdomain", "Baseline external surface mapping after fingerprinting.")
-        add("cloud", "Baseline CDN/cloud and bucket exposure checks.")
-        add("dns", "Baseline DNS, SSL, and port posture checks.")
-        add("dns_detritus", "DNS-based stale record and legacy host checks are useful without HTTP access.")
+        for key, step in STEP_BY_KEY.items():
+            if key != "basic" and key in BASELINE_STEPS:
+                add(key, step.reason)
 
         if security_block:
             block_reason = f"Security challenge detected ({security_block}); HTTP-heavy module likely blocked."
-            for key in [
-                "js", "graphql", "secrets", "vuln", "business", "cookies",
-                "endpoints", "payment", "supabase_rls", "supabase_rpc",
-                "supabase_storage", "wellknown", "apk", "admin_scan",
-                "nextjs", "laravel",
-            ]:
+            for key in sorted(HTTP_HEAVY_STEPS):
                 skip(key, block_reason)
             self._record_smart_plan(plan, reasons, skip_reasons)
             return plan
@@ -236,59 +236,59 @@ class NexusREC:
         js_techs = ["React", "Next.js", "Vue.js", "Nuxt.js", "Angular",
                     "Svelte", "Webpack", "Vite", "JavaScript"]
         if any(t in tech_names for t in js_techs) or has_js_from_html:
-            add("js", "JavaScript framework/assets detected in fingerprinting or HTML.")
-            add("secrets", "Client assets may expose public config, endpoints, or accidental secrets.")
+            add("js", STEP_BY_KEY["js"].reason)
+            add("secrets", STEP_BY_KEY["secrets"].reason)
         else:
-            skip("js", "No JavaScript framework or bundle indicators were detected.")
-            skip("secrets", "Secret scanning depends on HTML/JS assets; no useful asset signal was found.")
+            skip("js", STEP_BY_KEY["js"].skip_reason)
+            skip("secrets", STEP_BY_KEY["secrets"].skip_reason)
         # JS analysis runs via should_run check in step_task
 
         if detected("GraphQL", "Apollo"):
-            add("graphql", "GraphQL/Apollo technology was detected during fingerprinting.")
+            add("graphql", STEP_BY_KEY["graphql"].reason)
         else:
-            skip("graphql", "No GraphQL/Apollo signal was detected before JS extraction.")
+            skip("graphql", STEP_BY_KEY["graphql"].skip_reason)
 
         # ── Stack-specific modules ────────────────────
         if detected("Next.js"):
-            add("nextjs", "Next.js detected; framework-specific routes/assets checks are relevant.")
+            add("nextjs", STEP_BY_KEY["nextjs"].reason)
         else:
-            skip("nextjs", "Next.js was not detected.")
+            skip("nextjs", STEP_BY_KEY["nextjs"].skip_reason)
         if detected("Laravel"):
-            add("laravel", "Laravel detected; framework-specific debug/route checks are relevant.")
+            add("laravel", STEP_BY_KEY["laravel"].reason)
         else:
-            skip("laravel", "Laravel was not detected.")
+            skip("laravel", STEP_BY_KEY["laravel"].skip_reason)
 
         if detected("Supabase"):
-            add("supabase_rls", "Supabase detected; anon/RLS exposure checks are relevant.")
-            add("supabase_rpc", "Supabase detected; RPC exposure checks are relevant.")
-            add("supabase_storage", "Supabase detected; storage bucket exposure checks are relevant.")
+            add("supabase_rls", STEP_BY_KEY["supabase_rls"].reason)
+            add("supabase_rpc", STEP_BY_KEY["supabase_rpc"].reason)
+            add("supabase_storage", STEP_BY_KEY["supabase_storage"].reason)
         else:
-            skip("supabase_rls", "Supabase was not detected.")
-            skip("supabase_rpc", "Supabase was not detected.")
-            skip("supabase_storage", "Supabase was not detected.")
+            skip("supabase_rls", STEP_BY_KEY["supabase_rls"].skip_reason)
+            skip("supabase_rpc", STEP_BY_KEY["supabase_rpc"].skip_reason)
+            skip("supabase_storage", STEP_BY_KEY["supabase_storage"].skip_reason)
 
-        add("cookies", "Session and CSRF posture is relevant for web targets.")
-        add("endpoints", "Endpoint discovery is relevant after fingerprinting and asset extraction.")
-        add("wellknown", "Well-known files, security.txt, and llms.txt are low-impact intelligence sources.")
+        add("cookies", STEP_BY_KEY["cookies"].reason)
+        add("endpoints", STEP_BY_KEY["endpoints"].reason)
+        add("wellknown", STEP_BY_KEY["wellknown"].reason)
 
         try:
-            from modules.recon.payment_gateway import PaymentGatewayRecon
+            from modules.recon.web.payment_gateway import PaymentGatewayRecon
             pg = PaymentGatewayRecon(self.target)
             payment_signals = {}
             payment_signals.update(pg.from_csp(csp_header) if csp_header else {})
             payment_signals.update(pg.from_html(html) if html else {})
             payment_keys = pg.extract_payment_keys(html) if html else {}
             if payment_signals or payment_keys:
-                add("payment", "Payment gateway domains/scripts/keys were detected in CSP or HTML.")
+                add("payment", STEP_BY_KEY["payment"].reason)
             else:
-                skip("payment", "No payment gateway indicators were detected in CSP or HTML.")
+                skip("payment", STEP_BY_KEY["payment"].skip_reason)
         except Exception:
             skip("payment", "Payment signal pre-check failed; module can still be selected explicitly.")
 
         # ── Vuln scanner ─────────────────────────────
         if self.scan_mode == "safe":
-            add("vuln", "Safe vulnerability checks are allowed in safe mode; active payloads remain gated.")
-            skip("business", "Business-logic probes require active/aggressive authorized mode.")
+            add("vuln", STEP_BY_KEY["vuln"].reason)
+            skip("business", STEP_BY_KEY["business"].skip_reason)
         elif has_waf:
             if allow_prompts:
                 if self._ask_waf_bypass(waf):
@@ -308,11 +308,12 @@ class NexusREC:
             add("business", "Authorized active mode and no WAF/CDN block signal detected.")
 
         if self.scan_mode in ("active", "aggressive"):
-            add("admin_scan", "Authorized active mode allows deeper admin surface discovery.")
+            add("admin_scan", STEP_BY_KEY["admin_scan"].reason)
         else:
-            skip("admin_scan", "Admin deep scan is held for active/aggressive authorized mode or later discovery.")
+            skip("admin_scan", STEP_BY_KEY["admin_scan"].skip_reason)
 
-        skip("apk", "Mobile app references are checked after JavaScript/HTML discovery.")
+        skip("apk", STEP_BY_KEY["apk"].skip_reason)
+        skip("backend_scan", STEP_BY_KEY["backend_scan"].skip_reason)
 
         self._record_smart_plan(plan, reasons, skip_reasons)
 
@@ -438,44 +439,7 @@ class NexusREC:
             "started_at": datetime.now().isoformat(timespec="seconds"),
             "requested_modules": sorted(self.enabled_modules) if self.enabled_modules is not None else "smart/full",
         }
-        ALL_STEPS = {
-            "basic":           "Target Fingerprinting & Headers",
-            "subdomain":       "Subdomain Enumeration",
-            "cloud":           "Cloud & Bucket Detection",
-            "js":              "JavaScript & API Extraction",
-            "graphql":         "GraphQL Introspection",
-            "secrets":         "Secrets & Exposed Files",
-            "vuln":            "Vulnerability Scanner",
-            "business":        "Business Logic Checks",
-            "cookies":         "Cookie & Session Analysis",
-            "dns":             "DNS, SSL & Port Analysis",
-            "endpoints":       "Endpoint Discovery",
-            "payment":         "Payment Gateway & Billing Surface",
-            "supabase_rls":    "Supabase RLS Policy Testing",
-            "supabase_rpc":    "Supabase RPC Enumeration",
-            "supabase_storage":"Supabase Storage Audit",
-            "wellknown":       "Well-Known / llms.txt Discovery",
-            "apk":             "APK Analysis",
-            "dns_detritus":    "DNS Detritus Detection",
-            "admin_scan":      "Admin Subdomain Deep Scan",
-        }
-
-        execution_order = list(ALL_STEPS.keys())
-
-        def _planned_total(plan, detected_stack=None):
-            if plan is None:
-                return len(execution_order)
-            planned = set(plan)
-            planned.add('basic')
-            total = sum(1 for key in execution_order if key in planned)
-            detected_stack = detected_stack or []
-            if "Next.js" in detected_stack and 'nextjs' in planned:
-                total += 1
-            elif "Laravel" in detected_stack and 'laravel' in planned:
-                total += 1
-            return max(1, total)
-
-        total_steps = _planned_total(self.enabled_modules)
+        total_steps = planned_total(self.enabled_modules)
 
         with Progress(
             SpinnerColumn(),
@@ -517,7 +481,7 @@ class NexusREC:
             def step_task(module_key: str) -> int:
                 nonlocal active_phase_num
                 active_phase_num += 1
-                name = ALL_STEPS.get(module_key, "Task")
+                name = STEP_TITLES.get(module_key, "Task")
                 # Explicit print for terminals that don't render Rich live updates
                 progress.console.print(
                     f"  [bold cyan]▶ Phase {active_phase_num}:[/bold cyan] "
@@ -531,14 +495,28 @@ class NexusREC:
                     description=f"[bold white]» {name}...[/bold white]")
                 return t
 
+            def run_registered_step(module_key: str, result_key: str | None = None,
+                                    registry_key: str | None = None,
+                                    configure=None, after=None):
+                step = STEP_BY_KEY.get(module_key)
+                result_name = result_key or (step.output_key if step else module_key)
+                lookup_key = registry_key or (step.module_key if step else module_key)
+                t = step_task(module_key)
+                module_path = MODULES_REGISTRY.get(lookup_key) or STACK_MODULES.get(lookup_key)
+                module_obj = self._load_module(module_path) if module_path else None
+                if module_obj:
+                    if configure:
+                        configure(module_obj)
+                    self._run_module(result_name, module_obj, progress, t)
+                    if after:
+                        after(module_obj)
+                else:
+                    progress.update(t, advance=1)
+                _tick(module_key)
+                return module_obj
+
             # ── STEP 1: Basic (ALWAYS) ───────────────────
-            t = step_task('basic')
-            basic_mod = self._load_module(MODULES_REGISTRY['basic'])
-            if basic_mod:
-                self._run_module('basic', basic_mod, progress, t)
-            else:
-                progress.update(t, advance=1)
-            _tick("basic")
+            run_registered_step('basic')
 
             # Collect detected info for smart decisions
             stack    = self.results.get('basic', {}).get('detected_stack', [])
@@ -611,7 +589,7 @@ class NexusREC:
                 if smart_skips:
                     progress.console.print(f"  [dim]→ Smart skipped: {len(smart_skips)} modules with recorded reasons[/dim]")
 
-            progress.update(main_task, total=_planned_total(smart_plan, self.results.get('detected_stack', [])))
+            progress.update(main_task, total=planned_total(smart_plan))
 
             def should_run(key: str) -> bool:
                 if smart_plan is None:
@@ -621,11 +599,10 @@ class NexusREC:
             # ── STEP 2: Subdomains ───────────────────────
             sub_mod = None
             if should_run('subdomain'):
-                t = step_task('subdomain')
-                sub_mod = self._load_module(MODULES_REGISTRY['subdomain'])
-                if sub_mod:
-                    sub_mod.domain = self.domain
-                    self._run_module('subdomain', sub_mod, progress, t)
+                def configure_subdomain(mod):
+                    mod.domain = self.domain
+
+                def after_subdomain(mod):
                     # Auto-run backend IP discovery on resolved subdomain IPs
                     sub_results = self.results.get('subdomain', {})
                     resolved_subs = sub_results.get('subdomains', [])
@@ -637,13 +614,13 @@ class NexusREC:
                         progress.console.print(f"  [green]→ Found {len(bkapi_subs)} backend subdomain(s), probing IP redirects...[/green]")
                         ip_discoveries = []
                         for bs in bkapi_subs[:5]:
-                            disc = sub_mod.discover_backend_from_ip(bs['ip'])
+                            disc = mod.discover_backend_from_ip(bs['ip'])
                             if disc.get('redirect_found'):
                                 ip_discoveries.append(disc)
                                 progress.console.print(f"    [yellow]⚡ {bs['ip']} → {disc.get('backend_domain')}[/yellow]")
                         if ip_discoveries:
                             self.results['backend_ip_discovery'] = ip_discoveries
-                            self.results['subdomain'] = getattr(sub_mod, 'results', self.results.get('subdomain', {}))
+                            self.results['subdomain'] = getattr(mod, 'results', self.results.get('subdomain', {}))
                     discovered_subs = self.results.get('subdomain', {}).get('subdomains', [])
                     admin_like = [
                         s for s in discovered_subs
@@ -659,312 +636,215 @@ class NexusREC:
                             main_task,
                         ):
                             progress.console.print("  [green]→ Admin-like subdomains detected, enabling admin deep scan[/green]")
-                else:
-                    progress.update(t, advance=1)
-                _tick("subdomain")
+
+                sub_mod = run_registered_step('subdomain', configure=configure_subdomain, after=after_subdomain)
             else:
                 _skip("subdomain")
 
             # ── STEP 3: Cloud ────────────────────────────
             if should_run('cloud'):
-                t = step_task('cloud')
-                cloud_mod = self._load_module(MODULES_REGISTRY['cloud'])
-                if cloud_mod:
-                    cloud_mod.domain = self.domain
-                    self._run_module('cloud', cloud_mod, progress, t)
-                else:
-                    progress.update(t, advance=1)
-                _tick("cloud")
+                run_registered_step('cloud', configure=lambda mod: setattr(mod, 'domain', self.domain))
             else:
                 _skip("cloud")
 
             # ── STEP 4: JS Analysis ──────────────────────
-            js_mod = None
             if should_run('js'):
-                t = step_task('js')
-                js_mod = self._load_module(MODULES_REGISTRY['js'])
-                if js_mod:
-                    self._run_module('js', js_mod, progress, t)
-                else:
-                    progress.update(t, advance=1)
-                _tick("js")
-                # Feed JS APIs back to subdomain module
-                js_apis = self.results.get('js', {}).get('extracted_apis', [])
-                if js_apis and sub_mod is not None:
-                    sub_mod.extract_from_js_apis(js_apis)
-                    sub_mod.discover_related_domains(js_apis)
-                    sub_mod.discover_backends_from_js(js_apis)
-                    self.results['subdomain'] = getattr(sub_mod, 'results', self.results.get('subdomain', {}))
-                # Auto-enable graphql module if JS found graphql endpoints
-                if js_apis and any('graphql' in a.lower() for a in js_apis):
-                    if self._smart_add_module(
-                        smart_plan,
-                        'graphql',
-                        "GraphQL endpoint discovered in JavaScript assets.",
-                        progress,
-                        main_task,
-                    ):
-                        progress.console.print("  [green]→ GraphQL endpoints detected in JS, enabling graphql module[/green]")
-                mobile_apps = self.results.get('js', {}).get('mobile_apps', {})
-                if mobile_apps:
-                    if self._smart_add_module(
-                        smart_plan,
-                        'apk',
-                        "Mobile app references discovered in JavaScript/HTML metadata.",
-                        progress,
-                        main_task,
-                    ):
-                        progress.console.print("  [green]→ Mobile app references detected, enabling APK/mobile analysis[/green]")
+                def after_js(_mod):
+                    js_apis = self.results.get('js', {}).get('extracted_apis', [])
+                    if js_apis and sub_mod is not None:
+                        sub_mod.extract_from_js_apis(js_apis)
+                        sub_mod.discover_related_domains(js_apis)
+                        sub_mod.discover_backends_from_js(js_apis)
+                        self.results['subdomain'] = getattr(sub_mod, 'results', self.results.get('subdomain', {}))
+                    if js_apis and any('graphql' in a.lower() for a in js_apis):
+                        if self._smart_add_module(
+                            smart_plan,
+                            'graphql',
+                            "GraphQL endpoint discovered in JavaScript assets.",
+                            progress,
+                            main_task,
+                        ):
+                            progress.console.print("  [green]→ GraphQL endpoints detected in JS, enabling graphql module[/green]")
+                    mobile_apps = self.results.get('js', {}).get('mobile_apps', {})
+                    if mobile_apps:
+                        if self._smart_add_module(
+                            smart_plan,
+                            'apk',
+                            STEP_BY_KEY["apk"].reason,
+                            progress,
+                            main_task,
+                        ):
+                            progress.console.print("  [green]→ Mobile app references detected, enabling APK/mobile analysis[/green]")
+
+                run_registered_step('js', after=after_js)
             else:
                 _skip("js")
 
             # ── STEP 5: GraphQL ──────────────────────────
             if should_run('graphql'):
-                t = step_task('graphql')
-                gql_mod = self._load_module(MODULES_REGISTRY['graphql'])
-                if gql_mod:
-                    self._run_module('graphql', gql_mod, progress, t)
-                else:
-                    progress.update(t, advance=1)
-                _tick("graphql")
+                run_registered_step('graphql')
             else:
                 _skip("graphql")
 
             # ── STEP 6: Secrets ──────────────────────────
             if should_run('secrets'):
-                t = step_task('secrets')
-                sec_mod = self._load_module(MODULES_REGISTRY['secrets'])
-                if sec_mod:
-                    self._run_module('secrets', sec_mod, progress, t)
-                else:
-                    progress.update(t, advance=1)
-                _tick("secrets")
+                run_registered_step('secrets')
             else:
                 _skip("secrets")
 
             # Stack-specific module (Next.js / Laravel)
             det_stack = self.results.get('detected_stack', [])
             if "Next.js" in det_stack and should_run('nextjs'):
-                nextjs_mod = self._load_module(STACK_MODULES['Next.js'])
-                if nextjs_mod:
+                def configure_nextjs(mod):
                     basic_html    = self.results.get('basic', {}).get('_html', '')
                     raw_headers   = self.results.get('basic', {}).get('headers', {}).get('_raw_headers', {})
-                    if basic_html:
-                        nextjs_mod.set_initial_response(basic_html, raw_headers)
-                    t_nx = step_task('nextjs')
-                    self._run_module('nextjs', nextjs_mod, progress, t_nx)
-                    _tick("nextjs")
+                    if basic_html and hasattr(mod, 'set_initial_response'):
+                        mod.set_initial_response(basic_html, raw_headers)
+
+                run_registered_step('nextjs', registry_key='Next.js', configure=configure_nextjs)
             elif should_run('nextjs'):
                 _skip("nextjs")
 
             if "Laravel" in det_stack and should_run('laravel'):
-                laravel_mod = self._load_module(STACK_MODULES['Laravel'])
-                if laravel_mod:
-                    t_lv = step_task('laravel')
-                    self._run_module('laravel', laravel_mod, progress, t_lv)
-                    _tick("laravel")
+                run_registered_step('laravel', registry_key='Laravel')
             elif should_run('laravel'):
                 _skip("laravel")
 
             # ── STEP 7: Vuln Scanner ─────────────────────
             if should_run('vuln'):
-                t = step_task('vuln')
-                vuln_mod = self._load_module(MODULES_REGISTRY['vuln'])
-                if vuln_mod:
-                    self._run_module('vulnerabilities', vuln_mod, progress, t)
-                else:
-                    progress.update(t, advance=1)
-                _tick("vuln")
+                run_registered_step('vuln')
             else:
                 _skip("vuln")
 
             # ── STEP 8: Business Logic ───────────────────
             if should_run('business'):
-                t = step_task('business')
-                biz_mod = self._load_module(MODULES_REGISTRY['business'])
-                if biz_mod:
-                    self._run_module('business_logic', biz_mod, progress, t)
-                else:
-                    progress.update(t, advance=1)
-                _tick("business")
+                run_registered_step('business')
             else:
                 _skip("business")
 
             # ── STEP 9: Cookies ──────────────────────────
             if should_run('cookies'):
-                t = step_task('cookies')
-                cookie_mod = self._load_module(MODULES_REGISTRY['cookies'])
-                if cookie_mod:
-                    self._run_module('cookies', cookie_mod, progress, t)
-                else:
-                    progress.update(t, advance=1)
-                _tick("cookies")
+                run_registered_step('cookies')
             else:
                 _skip("cookies")
 
             # ── STEP 10: DNS ─────────────────────────────
             if should_run('dns'):
-                t = step_task('dns')
-                dns_mod = self._load_module(MODULES_REGISTRY['dns'])
-                if dns_mod:
-                    self._run_module('dns', dns_mod, progress, t)
-                else:
-                    progress.update(t, advance=1)
-                _tick("dns")
+                run_registered_step('dns')
             else:
                 _skip("dns")
 
             # ── STEP 11: Endpoints ───────────────────────
             if should_run('endpoints'):
-                t = step_task('endpoints')
-                ep_mod = self._load_module(MODULES_REGISTRY['endpoints'])
-                if ep_mod:
-                    self._run_module('endpoints', ep_mod, progress, t)
-                else:
-                    progress.update(t, advance=1)
-                _tick("endpoints")
+                run_registered_step('endpoints')
             else:
                 _skip("endpoints")
 
             # ── STEP 12: Payment Gateway / Billing Surface ─────────
             if should_run('payment'):
-                t = step_task('payment')
-                try:
-                    from modules.recon.payment_gateway import PaymentGatewayRecon
+                def configure_payment(mod):
                     basic_html = self.results.get('basic', {}).get('_html', '')
                     basic_headers = self.results.get('basic', {}).get('headers', {})
                     csp_header = basic_headers.get('Content-Security-Policy', basic_headers.get('content-security-policy', ''))
-                    pg = PaymentGatewayRecon(self.target)
-                    pg_results = pg.run_all(html=basic_html, csp=csp_header, base_url=self.target)
-                    self.results['payment_gateway'] = pg_results
-                    completed_sections = self.results.setdefault('scan_metadata', {}).setdefault('completed_result_sections', [])
-                    if 'payment_gateway' not in completed_sections:
-                        completed_sections.append('payment_gateway')
-                    gateways = list(pg_results.get('csp_analysis', {}).keys())
+                    if hasattr(mod, 'set_initial_response'):
+                        mod.set_initial_response(basic_html, csp_header)
+
+                def after_payment(_mod):
+                    pg_results = self.results.get('payment_gateway', {})
+                    gateways = list(pg_results.get('csp_analysis', {}).keys()) if isinstance(pg_results, dict) else []
                     if gateways:
                         progress.console.print(f"  [green]Payment gateways: {', '.join(gateways)}[/green]")
-                    keys = pg_results.get('payment_keys', {})
+                    keys = pg_results.get('payment_keys', {}) if isinstance(pg_results, dict) else {}
                     if keys:
                         for provider, key_list in keys.items():
                             for k in key_list:
                                 if isinstance(k, dict):
                                     progress.console.print(f"  [yellow]{provider} key ({k.get('mode','?')}/{k.get('type','?')})[/yellow]")
-                    progress.update(t, advance=1)
-                except Exception as exc:
-                    self.results['payment_gateway'] = {'error': str(exc)}
-                    progress.update(t, advance=1)
-                _tick("payment")
+
+                run_registered_step('payment', configure=configure_payment, after=after_payment)
             else:
                 _skip("payment")
 
             # ── STEP 13: Supabase RLS Testing ──────────────
             if should_run('supabase_rls'):
-                t = step_task('supabase_rls')
-                supabase_mod = self._load_module(MODULES_REGISTRY['supabase_rls'])
-                if supabase_mod:
-                    self._run_module('supabase_rls', supabase_mod, progress, t)
+                def after_supabase_rls(_mod):
                     open_tables = self.results.get('supabase_rls', {}).get('rls_open_tables', [])
                     if open_tables:
                         progress.console.print(f"  [bold red]⚠ {len(open_tables)} Supabase tables accessible with anon_key![/bold red]")
-                else:
-                    progress.update(t, advance=1)
-                _tick("supabase_rls")
+
+                run_registered_step('supabase_rls', after=after_supabase_rls)
             else:
                 _skip("supabase_rls")
 
             # ── STEP 13: Supabase RPC Enumeration ──────────
             if should_run('supabase_rpc'):
-                t = step_task('supabase_rpc')
-                rpc_mod = self._load_module(MODULES_REGISTRY['supabase_rpc'])
-                if rpc_mod:
-                    self._run_module('supabase_rpc', rpc_mod, progress, t)
+                def after_supabase_rpc(_mod):
                     exposed_rpcs = self.results.get('supabase_rpc', {}).get('rpc_exposed', [])
                     if exposed_rpcs:
                         progress.console.print(f"  [bold yellow]⚡ {len(exposed_rpcs)} Supabase RPC functions discovered[/bold yellow]")
-                else:
-                    progress.update(t, advance=1)
-                _tick("supabase_rpc")
+
+                run_registered_step('supabase_rpc', after=after_supabase_rpc)
             else:
                 _skip("supabase_rpc")
 
             # ── STEP 14: Supabase Storage Audit ────────────
             if should_run('supabase_storage'):
-                t = step_task('supabase_storage')
-                storage_mod = self._load_module(MODULES_REGISTRY['supabase_storage'])
-                if storage_mod:
-                    self._run_module('supabase_storage', storage_mod, progress, t)
+                def after_supabase_storage(_mod):
                     public_buckets = self.results.get('supabase_storage', {}).get('public_buckets', [])
                     if public_buckets:
                         progress.console.print(f"  [bold red]⚠ {len(public_buckets)} public Supabase storage buckets found![/bold red]")
-                else:
-                    progress.update(t, advance=1)
-                _tick("supabase_storage")
+
+                run_registered_step('supabase_storage', after=after_supabase_storage)
             else:
                 _skip("supabase_storage")
 
             # ── STEP 15: Well-Known Discovery ──────────────
             if should_run('wellknown'):
-                t = step_task('wellknown')
-                wk_mod = self._load_module(MODULES_REGISTRY['wellknown'])
-                if wk_mod:
-                    self._run_module('wellknown', wk_mod, progress, t)
+                def after_wellknown(_mod):
                     llms = self.results.get('wellknown', {}).get('llms_txt_found', [])
                     if llms:
                         progress.console.print(f"  [bold yellow]📄 llms.txt found! Potential intelligence source[/bold yellow]")
-                else:
-                    progress.update(t, advance=1)
-                _tick("wellknown")
+
+                run_registered_step('wellknown', after=after_wellknown)
             else:
                 _skip("wellknown")
 
             # ── STEP 16: APK Analysis ──────────────────────
             if should_run('apk'):
-                t = step_task('apk')
-                apk_mod = self._load_module(MODULES_REGISTRY['apk'])
-                if apk_mod:
-                    self._run_module('apk', apk_mod, progress, t)
+                def after_apk(_mod):
                     apk_refs = self.results.get('apk', {}).get('apk_references', [])
                     if apk_refs:
                         progress.console.print(f"  [green]📱 {len(apk_refs)} APK/App references found[/green]")
                     apk_keys = self.results.get('apk', {}).get('apk_secrets', [])
                     if apk_keys:
                         progress.console.print(f"  [bold yellow]🔑 {len(apk_keys)} potential secrets extracted from APK[/bold yellow]")
-                else:
-                    progress.update(t, advance=1)
-                _tick("apk")
+
+                run_registered_step('apk', after=after_apk)
             else:
                 _skip("apk")
 
             # ── STEP 17: DNS Detritus Detection ───────────
             if should_run('dns_detritus'):
-                t = step_task('dns_detritus')
-                detritus_mod = self._load_module(MODULES_REGISTRY['dns_detritus'])
-                if detritus_mod:
-                    self._run_module('dns_detritus', detritus_mod, progress, t)
+                def after_dns_detritus(_mod):
                     total = self.results.get('dns_detritus', {}).get('total_detritus', 0)
                     if total:
                         progress.console.print(f"  [bold yellow]🗑️ {total} DNS detritus records found[/bold yellow]")
-                else:
-                    progress.update(t, advance=1)
-                _tick("dns_detritus")
+
+                run_registered_step('dns_detritus', after=after_dns_detritus)
             else:
                 _skip("dns_detritus")
 
             # ── STEP 18: Admin Subdomain Deep Scan ────────
             if should_run('admin_scan'):
-                t = step_task('admin_scan')
-                admin_mod = self._load_module(MODULES_REGISTRY['admin_scan'])
-                if admin_mod:
-                    self._run_module('admin_scan', admin_mod, progress, t)
+                def after_admin_scan(_mod):
                     admin_subs = self.results.get('admin_scan', {}).get('admin_subdomains', [])
                     if admin_subs:
                         progress.console.print(f"  [bold yellow]🔐 {len(admin_subs)} admin subdomains discovered[/bold yellow]")
                     accessible = self.results.get('admin_scan', {}).get('accessible_admin', [])
                     if accessible:
                         progress.console.print(f"  [bold red]⚠ {len(accessible)} admin subdomains potentially accessible![/bold red]")
-                else:
-                    progress.update(t, advance=1)
-                _tick("admin_scan")
+
+                run_registered_step('admin_scan', after=after_admin_scan)
             else:
                 _skip("admin_scan")
 
@@ -977,40 +857,28 @@ class NexusREC:
                              and 'apple.com' not in b.get('url', '')
                              and 'cloudflare' not in b.get('url', '')
                              and 'react.dev' not in b.get('url', '')]
-            if real_backends and should_run('endpoints'):
-                progress.console.print(f"  [bold cyan]⚡ Scanning {len(real_backends)} backend server(s) for APIs...[/bold cyan]")
-                self.results['backend_scan'] = {}
-                for b in real_backends[:3]:
-                    b_url = b.get('url', '')
-                    progress.console.print(f"    [dim]→ {b_url}[/dim]")
-                    try:
-                        r = requests.get(b_url, timeout=8,
-                            headers={'User-Agent': 'Mozilla/5.0'})
-                        be_result = {
-                            'url': b_url,
-                            'status': r.status_code,
-                            'size': len(r.content),
-                            'server': r.headers.get('Server', ''),
-                            'content_type': r.headers.get('Content-Type', ''),
-                        }
-                        if 'text/html' not in be_result.get('content_type', ''):
-                            be_result['preview'] = r.text[:300]
-                        # Quick API probe
-                        for api_path in ['/api/', '/health', '/status', '/graphql', '/docs']:
-                            try:
-                                ar = requests.get(f"{b_url.rstrip('/')}{api_path}", timeout=5,
-                                    headers={'User-Agent': 'Mozilla/5.0'})
-                                if ar.status_code not in [404, 405]:
-                                    be_result.setdefault('api_endpoints', []).append({
-                                        'path': api_path,
-                                        'status': ar.status_code,
-                                        'size': len(ar.content),
-                                    })
-                            except:
-                                pass
-                        self.results['backend_scan'][b_url] = be_result
-                    except Exception as e:
-                        self.results['backend_scan'][b_url] = {'url': b_url, 'error': str(e)}
+            if real_backends:
+                self._smart_add_module(
+                    smart_plan,
+                    'backend_scan',
+                    f"{len(real_backends)} backend/API host reference(s) discovered.",
+                    progress,
+                    main_task,
+                )
+            if should_run('backend_scan'):
+                if real_backends:
+                    progress.console.print(f"  [bold cyan]⚡ Scanning {len(real_backends)} backend server(s) for APIs...[/bold cyan]")
+
+                def configure_backend_scan(mod):
+                    if hasattr(mod, 'set_backends'):
+                        mod.set_backends(real_backends, self.domain)
+
+                def after_backend_scan(_mod):
+                    scanned = self.results.get('backend_scan', {}).get('scanned_backends', {})
+                    for backend_url in list(scanned.keys())[:3]:
+                        progress.console.print(f"    [dim]→ {backend_url}[/dim]")
+
+                run_registered_step('backend_scan', configure=configure_backend_scan, after=after_backend_scan)
 
             # Final summary of skipped modules
             metadata = self.results.setdefault('scan_metadata', {})

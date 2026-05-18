@@ -22,7 +22,7 @@ class WappalyzerEngine:
     }
 
     def _load(self):
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         path = os.path.join(base, 'data', 'technologies.json')
         with open(path, 'r', encoding='utf-8') as f:
             self.technologies = json.load(f)

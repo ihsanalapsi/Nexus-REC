@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from modules.core.config import MODULES_REGISTRY, SCAN_MODES, VERSION
+from modules.core.dependencies import check_dependencies
 
 VALID_MODULES = set(MODULES_REGISTRY) | {"nextjs", "laravel"}
 
@@ -60,6 +61,10 @@ Author: Ihsan Alapsi — https://github.com/ihsanalapsi/Nexus-REC
     parser.add_argument(
         "--debug", action="store_true",
         help="Show full Python tracebacks for unexpected errors."
+    )
+    parser.add_argument(
+        "--check-deps", action="store_true",
+        help="Check required/optional Python packages and exit."
     )
     return parser
 
@@ -227,6 +232,11 @@ def enforce_authorization(args, console):
 def run_cli(recon_cls, console, banner, links, argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.check_deps:
+        status = check_dependencies(console=console, exit_on_missing_required=False, include_optional=True)
+        if status["ok"]:
+            console.print("[bold green]All required dependencies are installed.[/bold green]")
+        sys.exit(0 if status["ok"] else 2)
     interactive_launch = args.target is None
     args = prompt_for_target(args, console, banner, links)
     valid, reason = validate_target(args.target)
@@ -236,6 +246,7 @@ def run_cli(recon_cls, console, banner, links, argv=None):
         args = prompt_for_interactive_options(args, console)
     enabled = resolve_enabled_modules(args.modules, parser)
     enforce_authorization(args, console)
+    check_dependencies(console=console, exit_on_missing_required=True, include_optional=False)
 
     try:
         recon = recon_cls(

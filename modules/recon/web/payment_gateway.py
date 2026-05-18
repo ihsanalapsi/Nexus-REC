@@ -50,6 +50,12 @@ class PaymentGatewayRecon:
         self.target_url = target_url.rstrip('/')
         self.domain = target_url.split("//")[-1].split("/")[0]
         self.results = {}
+        self.initial_html = ''
+        self.initial_csp = ''
+
+    def set_initial_response(self, html='', csp=''):
+        self.initial_html = html or ''
+        self.initial_csp = csp or ''
 
     def from_csp(self, csp_header):
         findings = {}
@@ -246,6 +252,23 @@ class PaymentGatewayRecon:
 
     def run_all(self, html='', csp='', base_url='', js_files=None):
         self.results = {}
+        if not base_url:
+            base_url = self.target_url
+        if not html:
+            html = self.initial_html
+        if not csp:
+            csp = self.initial_csp
+        if not html and not csp:
+            try:
+                response = requests.get(
+                    self.target_url,
+                    timeout=10,
+                    headers={'User-Agent': 'Mozilla/5.0'},
+                )
+                html = response.text
+                csp = response.headers.get('Content-Security-Policy', response.headers.get('content-security-policy', ''))
+            except Exception:
+                pass
         if csp:
             self.results['csp_analysis'] = self.from_csp(csp)
         if html:

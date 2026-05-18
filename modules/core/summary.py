@@ -584,15 +584,19 @@ def display_summary(results, domain, console):
 
     # Backend scan results
     backend_scan = results.get('backend_scan', {})
-    if backend_scan:
-        btable = Table(title=f"[bold cyan]⚡ Backend API Scan ({len(backend_scan)})[/bold cyan]",
+    if backend_scan and isinstance(backend_scan, dict):
+        backend_items = backend_scan.get('scanned_backends', backend_scan)
+        if not backend_items:
+            backend_items = {}
+    if backend_scan and isinstance(backend_scan, dict) and backend_items:
+        btable = Table(title=f"[bold cyan]⚡ Backend API Scan ({len(backend_items)})[/bold cyan]",
                       show_header=True, header_style="bold cyan")
         btable.add_column("Backend URL", style="cyan", width=45)
         btable.add_column("Status", style="yellow", width=8)
         btable.add_column("Server", style="white", width=15)
         btable.add_column("Type", style="dim", width=20)
         btable.add_column("APIs Found", style="green", width=15)
-        for b_url, b_info in backend_scan.items():
+        for b_url, b_info in backend_items.items():
             st = b_info.get('status', b_info.get('error', '?'))
             sv = b_info.get('server', '')
             ct = b_info.get('content_type', '')[:20]
