@@ -918,5 +918,8 @@ class NexusREC:
         )
 
 
-if __name__ == "__main__":
+def main():
     run_cli(NexusREC, console, BANNER, LINKS)
+
+if __name__ == "__main__":
+    main()
