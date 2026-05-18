@@ -141,6 +141,52 @@ class NextJSRecon:
         self.results['routes'] = found
         return found
 
+    def discover_routes_from_manifest(self):
+        manifest_routes = set()
+        try:
+            r = self._get(self.target_url)
+            html = r.text
+
+            build_manifest_url = None
+            build_id = self.results.get('build_id')
+            if build_id:
+                manifest_url = f"/_next/static/{build_id}/_buildManifest.js"
+                build_manifest_url = urljoin(self.target_url, manifest_url)
+            else:
+                manifests = re.findall(
+                    r'src=["\']([^"\']*_next/static/[^"\']+/_buildManifest\.js)["\']',
+                    html
+                )
+                if manifests:
+                    build_manifest_url = urljoin(self.target_url, manifests[0])
+
+            if build_manifest_url:
+                resp = self._get(build_manifest_url, timeout=10)
+                if resp.status_code == 200:
+                    text = resp.text
+                    routes_in_manifest = re.findall(
+                        r'["\'](/(?:[a-zA-Z0-9_/.-]+(?:\[[^\]]+\])?){1,})["\']',
+                        text
+                    )
+                    sorted_pages = re.search(
+                        r'sortedPages:\[([^\]]+)\]', text
+                    )
+                    if sorted_pages:
+                        pages_str = sorted_pages.group(1)
+                        page_routes = re.findall(
+                            r'["\'](/(?:[a-zA-Z0-9_/.-]+(?:\[[^\]]+\])?)?)["\']',
+                            pages_str
+                        )
+                        manifest_routes.update(page_routes)
+                    manifest_routes.update(routes_in_manifest)
+
+            self.results['manifest_routes'] = sorted(manifest_routes)
+            self.results['manifest_route_count'] = len(manifest_routes)
+        except:
+            self.results['manifest_routes'] = []
+            self.results['manifest_route_count'] = 0
+        return list(manifest_routes)
+
     def check_middleware_bypass(self):
         payloads = [
             'middleware:middleware:middleware:middleware:middleware',
@@ -254,6 +300,7 @@ class NextJSRecon:
     def run_all(self):
         self.detect_version()
         self.discover_routes()
+        self.discover_routes_from_manifest()
         bypass, details = self.check_middleware_bypass()
         self.results['middleware_bypass'] = bypass
         self.results['middleware_details'] = details

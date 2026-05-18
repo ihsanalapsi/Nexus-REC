@@ -230,6 +230,16 @@ def display_summary(results, domain, console):
         if len(tokens) > 5:
             console.print(f"  [dim]... and {len(tokens)-5} more[/dim]")
 
+    amplify_config = js_data.get('amplify_config', {})
+    if amplify_config:
+        console.print(f"\n[bold magenta]☁️ AWS Amplify Config Exposed ({len(amplify_config)} keys):[/bold magenta]")
+        for key, values in sorted(amplify_config.items()):
+            display_key = key.replace('aws_', '').replace('_', ' ').title()
+            for val in values[:3]:
+                console.print(f"  [cyan]{display_key}:[/cyan] {val}")
+            if len(values) > 3:
+                console.print(f"    [dim]+ {len(values)-3} more values[/dim]")
+
     gql_data = results.get('graphql', {})
     introspection = gql_data.get('introspection', {})
     for url, status in introspection.items():
@@ -264,6 +274,24 @@ def display_summary(results, domain, console):
             if vuln_tests:
                 console.print(f"  [bold red]⚠ GraphQL CSRF Vulnerability at {url}![/bold red]")
                 console.print(f"    Apollo Require Preflight / CSRF protection not active for: {', '.join(vuln_tests)}")
+
+    # ── AWS AppSync endpoint findings ──
+    appsync_data = gql_data.get('appsync_endpoints', {})
+    if appsync_data:
+        console.print(f"\n[bold magenta]⚡ AWS AppSync Endpoints ({len(appsync_data)}):[/bold magenta]")
+        for url, info in appsync_data.items():
+            console.print(f"  [cyan]Endpoint:[/cyan] {url}")
+            api_keys = info.get('detected_api_keys', [])
+            if api_keys:
+                for ak in api_keys:
+                    console.print(f"    [yellow]🔑 API Key:[/yellow] {ak}")
+            auth_results = info.get('auth_header_results', {})
+            if auth_results:
+                for hdr, hinfo in auth_results.items():
+                    err = hinfo.get('error_type', '?')
+                    st = hinfo.get('status', '?')
+                    if err != 'none':
+                        console.print(f"    [dim]Auth ({hdr}):[/dim] Status {st} — {err}")
 
     vuln_data = dict(results.get('vulnerabilities', {}))
     total_vulns = sum(len(v) for v in vuln_data.values() if isinstance(v, list))
@@ -746,6 +774,26 @@ def display_summary(results, domain, console):
         if leaks:
             for leak in leaks:
                 console.print(f"  [yellow]⚠ Leak:[/yellow] {leak}")
+
+        manifest_routes = nextjs_data.get('manifest_routes', [])
+        if manifest_routes:
+            console.print(f"  [green]🗺️ Routes from Build Manifest:[/green] {len(manifest_routes)} total")
+            public_routes = [r for r in manifest_routes if not any(
+                seg.startswith('[') for seg in r.split('/') if seg)]
+            dynamic_routes = [r for r in manifest_routes if any(
+                seg.startswith('[') for seg in r.split('/') if seg)]
+            if public_routes:
+                console.print(f"    [cyan]Static Routes:[/cyan]")
+                for pr in public_routes[:10]:
+                    console.print(f"      [dim]- {pr}[/dim]")
+                if len(public_routes) > 10:
+                    console.print(f"      [dim]... and {len(public_routes)-10} more[/dim]")
+            if dynamic_routes:
+                console.print(f"    [yellow]Dynamic Routes:[/yellow] {len(dynamic_routes)}")
+                for dr in dynamic_routes[:5]:
+                    console.print(f"      [dim]- {dr}[/dim]")
+                if len(dynamic_routes) > 5:
+                    console.print(f"      [dim]... and {len(dynamic_routes)-5} more[/dim]")
 
         api_chunks = nextjs_data.get('api_routes_from_chunks', [])
         if api_chunks:

@@ -187,6 +187,62 @@ def generate_markdown_report(results, domain):
                     lines.append(f"- {item}")
             lines.append("")
 
+    js_data = results.get('js', {})
+    amplify_config = js_data.get('amplify_config', {})
+    if _completed(metadata, 'js') and amplify_config:
+        rows = []
+        for key, values in sorted(amplify_config.items()):
+            disp = key.replace('aws_', '').replace('_', ' ').title()
+            for val in values[:5]:
+                rows.append([disp, val])
+            if len(values) > 5:
+                rows.append([disp, f"+ {len(values)-5} more"])
+        lines += ["---", "", f"## {section_num}. JS Analysis — AWS Amplify", "", _markdown_table(["Key", "Value"], rows), ""]
+        section_num += 1
+
+    gql_data = results.get('graphql', {})
+    appsync_data = gql_data.get('appsync_endpoints', {})
+    if _completed(metadata, 'graphql') and appsync_data:
+        lines += ["---", "", f"## {section_num}. GraphQL — AWS AppSync Endpoints", ""]
+        section_num += 1
+        for url, info in appsync_data.items():
+            lines += [f"### Endpoint: `{url}`", ""]
+            api_keys = info.get('detected_api_keys', [])
+            if api_keys:
+                for ak in api_keys:
+                    lines.append(f"- API Key: `{ak}`")
+            auth_results = info.get('auth_header_results', {})
+            if auth_results:
+                for hdr, hinfo in auth_results.items():
+                    err = hinfo.get('error_type', '?')
+                    st = hinfo.get('status', '?')
+                    lines.append(f"- Auth (`{hdr}`): Status {st} — {err}")
+            lines.append("")
+
+    nextjs_data = results.get('nextjs', {})
+    manifest_routes = nextjs_data.get('manifest_routes', [])
+    if _completed(metadata, 'nextjs') and manifest_routes:
+        lines += ["---", "", f"## {section_num}. Next.js — Build Manifest Routes", ""]
+        section_num += 1
+        public_routes = [r for r in manifest_routes if not any(
+            seg.startswith('[') for seg in r.split('/') if seg)]
+        dynamic_routes = [r for r in manifest_routes if any(
+            seg.startswith('[') for seg in r.split('/') if seg)]
+        if public_routes:
+            lines += [f"### Static Routes ({len(public_routes)})", ""]
+            for pr in public_routes[:20]:
+                lines.append(f"- `{pr}`")
+            if len(public_routes) > 20:
+                lines.append(f"- *... and {len(public_routes)-20} more*")
+            lines.append("")
+        if dynamic_routes:
+            lines += [f"### Dynamic Routes ({len(dynamic_routes)})", ""]
+            for dr in dynamic_routes[:10]:
+                lines.append(f"- `{dr}`")
+            if len(dynamic_routes) > 10:
+                lines.append(f"- *... and {len(dynamic_routes)-10} more*")
+            lines.append("")
+
     lines += [
         "---",
         "",

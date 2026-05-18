@@ -352,10 +352,91 @@ class GraphQLRecon:
         self.results['csrf_protection'] = csrf_results
         return csrf_results
 
+    def test_appsync_endpoints(self):
+        appsync_findings = {}
+        eps = self.results.get('endpoints', [])
+        for ep in eps:
+            url = ep['url']
+            if not ep.get('is_graphql', False):
+                continue
+
+            tests = []
+            api_key_pattern = r'(da2-[a-zA-Z0-9]+)'
+            api_keys = re.findall(api_key_pattern, str(ep))
+
+            for method in ['POST', 'GET', 'OPTIONS']:
+                try:
+                    r = requests.request(method, url,
+                        json={'query': '{__typename}'} if method != 'GET' else None,
+                        headers={'Content-Type': 'application/json'},
+                        timeout=10)
+                    data = r.json() if r.text else {}
+                    response_text = r.text
+                    is_appsync = any(k in response_text for k in
+                        ['UnknownOperationException', 'UnauthorizedException',
+                         'UnsupportedOperationException'])
+                    tests.append({
+                        'method': method,
+                        'status': r.status_code,
+                        'is_appsync': is_appsync,
+                    })
+                except:
+                    pass
+
+            api_key_tests = []
+            for key in api_keys[:5]:
+                try:
+                    r = requests.post(url,
+                        json={'query': '{__typename}'},
+                        headers={'Content-Type': 'application/json',
+                                 'x-api-key': key},
+                        timeout=10)
+                    data = r.json() if r.text else {}
+                    api_key_tests.append({
+                        'api_key': key[:15] + '...',
+                        'status': r.status_code,
+                        'authenticated': 'data' in data and data['data'] is not None,
+                    })
+                except:
+                    pass
+
+            url_ep = ep
+            auth_headers_test = {}
+            for auth_header, value in [
+                ('Authorization', 'AWS4-HMAC-SHA256 ...'),
+                ('x-api-key', 'test'),
+            ]:
+                try:
+                    r = requests.post(url,
+                        json={'query': '{__typename}'},
+                        headers={'Content-Type': 'application/json',
+                                 auth_header: value.split(' ')[0] if ' ' in value else value},
+                        timeout=10)
+                    data = r.json() if r.text else {}
+                    auth_headers_test[auth_header] = {
+                        'status': r.status_code,
+                        'error_type': data.get('errors', [{}])[0].get('errorType', '') if data.get('errors') else 'none',
+                    }
+                except:
+                    pass
+
+            if any(t.get('is_appsync') for t in tests) or api_key_tests or auth_headers_test:
+                appsync_findings[url] = {
+                    'tests': tests,
+                    'api_key_results': api_key_tests,
+                    'auth_header_results': auth_headers_test,
+                    'detected_api_keys': api_keys,
+                }
+
+        if appsync_findings:
+            self.results['appsync_endpoints'] = appsync_findings
+        return appsync_findings
+
     def run_all(self):
         self.find_endpoints()
         self.test_introspection()
         self.test_error_based_schema_leak()
         self.test_batch_queries()
         self.test_csrf_protection()
+        self.test_appsync_endpoints()
         return self.results

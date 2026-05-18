@@ -273,6 +273,53 @@ class JSRecon:
             self.results['source_maps'] = []
         return self.results
 
+    def extract_amplify_config(self, html=None, max_files=20):
+        amplify_config = {}
+        try:
+            if html is None:
+                r = self._get(self.target_url)
+                html = r.text
+            js_files = self._get_js_files(html)
+            all_js_content = ''
+            for js in js_files[:max_files]:
+                js_url = urljoin(self.target_url, js)
+                try:
+                    resp = self._get(js_url, timeout=10)
+                    all_js_content += resp.text + '\n'
+                except:
+                    pass
+
+            appsync_patterns = {
+                'aws_appsync_graphqlEndpoint': r'aws_appsync_graphqlEndpoint["\']*\s*:\s*["\']([^"\']+)["\']',
+                'aws_appsync_region': r'aws_appsync_region["\']*\s*:\s*["\']([^"\']+)["\']',
+                'aws_appsync_authenticationType': r'aws_appsync_authenticationType["\']*\s*:\s*["\']([^"\']+)["\']',
+                'aws_appsync_apiKey': r'aws_appsync_apiKey["\']*\s*:\s*["\'](da2-[a-zA-Z0-9]+)["\']',
+                'aws_project_region': r'aws_project_region["\']*\s*:\s*["\']([^"\']+)["\']',
+                'aws_user_pools_id': r'aws_user_pools_id["\']*\s*:\s*["\']([^"\']+)["\']',
+                'aws_user_pools_web_client_id': r'aws_user_pools_web_client_id["\']*\s*:\s*["\']([^"\']+)["\']',
+                'aws_cognito_identity_pool_id': r'aws_cognito_identity_pool_id["\']*\s*:\s*["\']([^"\']+)["\']',
+                'aws_user_files_s3_bucket': r'aws_user_files_s3_bucket["\']*\s*:\s*["\']([^"\']+)["\']',
+                'aws_user_files_s3_bucket_region': r'aws_user_files_s3_bucket_region["\']*\s*:\s*["\']([^"\']+)["\']',
+                'oauth_domain': r'oauth["\']*\s*:\s*\{[^}]*domain["\']*\s*:\s*["\']([^"\']+)["\']',
+                'user_pool_id': r'user_pool_id["\']*\s*:\s*["\']([^"\']+)["\']',
+                'user_pool_client_id': r'user_pool_client_id["\']*\s*:\s*["\']([^"\']+)["\']',
+                'identity_pool_id': r'identity_pool_id["\']*\s*:\s*["\']([^"\']+)["\']',
+                'bucket_name': r'bucket_name["\']*\s*:\s*["\']([^"\']+)["\']',
+                'aws_appsync_graphqlEndpoint_https': r'appsync-api\.([a-z0-9-]+)\.amazonaws\.com/graphql',
+                'default_authorization_type': r'default_authorization_type["\']*\s*:\s*["\']([^"\']+)["\']',
+            }
+
+            for key, pat in appsync_patterns.items():
+                matches = re.findall(pat, all_js_content)
+                if matches:
+                    amplify_config[key] = list(set(matches))
+
+            if amplify_config:
+                self.results['amplify_config'] = amplify_config
+        except:
+            pass
+        return amplify_config
+
     def run_all(self):
         try:
             r = self._get(self.target_url)
@@ -281,6 +328,7 @@ class JSRecon:
             return self.results
         self.audit_libraries()
         self.extract_apis(html)
+        self.extract_amplify_config(html)
         self.discover_source_maps(html)
         self.detect_mobile_apps(html)
         self.detect_jquery_vulns(html)
