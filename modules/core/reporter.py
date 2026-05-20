@@ -291,6 +291,96 @@ def generate_markdown_report(results, domain):
                 lines.append(f"- **Environment:** {saml['environment']}")
         lines.append("")
 
+    # ── CORS Deep Scan ─────────────────────────────────
+    cors_data = results.get('cors', {})
+    misconfigs = cors_data.get('misconfigurations', [])
+    if misconfigs:
+        lines += ["---", "", f"## {section_num}. CORS Deep Scan", ""]
+        section_num += 1
+        cors_rows = []
+        for m in misconfigs:
+            cors_rows.append([
+                m.get('severity', 'LOW'),
+                m.get('type', '?'),
+                m.get('endpoint', '?'),
+                m.get('message', '')[:100],
+            ])
+        lines += [_markdown_table(["Severity", "Type", "Endpoint", "Description"], cors_rows), ""]
+        # Also list tested endpoints
+        tested = cors_data.get('tested_endpoints', [])
+        if tested:
+            lines += [f"**Tested endpoints:** {len(tested)}", ""]
+
+    # ── OpenAPI Spec Discovery ─────────────────────────
+    oa_data = results.get('openapi', {})
+    if oa_data.get('spec_found'):
+        lines += ["---", "", f"## {section_num}. OpenAPI / Swagger Discovery", ""]
+        section_num += 1
+        for spec in oa_data.get('specs', []):
+            parsed = spec.get('parsed', {})
+            lines += [f"### Spec: {spec.get('path', '?')}", ""]
+            lines += [
+                f"- **Title:** {parsed.get('title', '?')}",
+                f"- **Version:** {parsed.get('version', '?')}",
+                f"- **Total Endpoints:** {parsed.get('total_endpoints', 0)}",
+                f"- **File size:** {spec.get('size', 0)} bytes",
+                "",
+            ]
+            unauth = parsed.get('unauthenticated_endpoints', [])
+            if unauth:
+                unauth_rows = []
+                for ep in unauth:
+                    unauth_rows.append([ep['method'], ep['path'], ep.get('summary', '')[:60]])
+                lines += [f"#### Unauthenticated Endpoints ({len(unauth)})", "",
+                          _markdown_table(["Method", "Path", "Summary"], unauth_rows), ""]
+            sensitive = parsed.get('sensitive_operations', [])
+            if sensitive:
+                sens_rows = []
+                for sa in sensitive[:10]:
+                    sens_rows.append([sa['method'], sa['path'], sa.get('summary', '')[:60]])
+                lines += [f"#### Sensitive Operations ({len(sensitive)})", "",
+                          _markdown_table(["Method", "Path", "Summary"], sens_rows), ""]
+
+    # ── Server Leak Detection ──────────────────────────
+    sl_data = results.get('server_leaks', {})
+    leaky = sl_data.get('leaky_headers', {})
+    if leaky:
+        lines += ["---", "", f"## {section_num}. Server Leak Detection", ""]
+        section_num += 1
+
+        header_rows = [[k, v] for k, v in sorted(leaky.items())]
+        lines += ["### Leaky Headers", "",
+                  _markdown_table(["Header", "Value"], header_rows), ""]
+
+        env = sl_data.get('environment_detected')
+        if env:
+            lines += [f"- **Environment:** {env} (confidence: {sl_data.get('environment_confidence', '?')})", ""]
+
+        timing = sl_data.get('server_timing_analysis', {})
+        internal_params = timing.get('internal_params', [])
+        if internal_params:
+            param_rows = []
+            for p in internal_params:
+                param_rows.append([
+                    p.get('internal_label', p.get('key', '?')),
+                    p.get('key', '?'),
+                    p.get('value', ''),
+                ])
+            lines += ["### Server Timing Analysis", "",
+                      _markdown_table(["Label", "Key", "Value"], param_rows), ""]
+
+        versions = sl_data.get('version_disclosures', [])
+        if versions:
+            ver_rows = []
+            for v in versions:
+                ver_rows.append([v['header'], v['version']])
+            lines += ["### Version Disclosures", "",
+                      _markdown_table(["Header", "Version"], ver_rows), ""]
+
+        regions = sl_data.get('internal_regions', [])
+        if regions:
+            lines += [f"- **Internal Regions:** {', '.join(regions)}", ""]
+
     lines += [
         "---",
         "",

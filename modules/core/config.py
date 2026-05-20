@@ -1,4 +1,4 @@
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 SCAN_MODES = ("safe", "active", "aggressive")
 
 MODULES_REGISTRY = {
@@ -22,6 +22,9 @@ MODULES_REGISTRY = {
     'apk': 'modules.recon.mobile.apk_analysis.APKRecon',
     'dns_detritus': 'modules.recon.infra.dns_detritus.DNSDetritusRecon',
     'admin_scan': 'modules.recon.infra.admin_scan.AdminScanRecon',
+    'cors': 'modules.recon.web.cors.CORSDeepScanner',
+    'openapi': 'modules.recon.web.openapi.OpenAPIAnalyzer',
+    'server_leaks': 'modules.recon.web.server_leaks.ServerLeakDetector',
 }
 
 STACK_MODULES = {

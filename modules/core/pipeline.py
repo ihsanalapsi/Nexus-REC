@@ -195,6 +195,28 @@ STEP_DEFINITIONS = [
         reason="Backend/API host references were discovered during JavaScript/subdomain analysis.",
         skip_reason="No backend/API hosts were discovered for follow-up scanning.",
     ),
+    StepDefinition(
+        "cors",
+        "CORS Deep Configuration Scan",
+        http_heavy=True,
+        smart_optional=True,
+        reason="CORS headers discovered; deep testing for wildcard+credentials, origin reflection, and dangerous methods is relevant.",
+        skip_reason="No CORS headers or API endpoints were detected on the target surface.",
+    ),
+    StepDefinition(
+        "openapi",
+        "OpenAPI / Swagger Spec Discovery",
+        http_heavy=True,
+        smart_optional=True,
+        reason="API documentation paths or framework indicators were detected.",
+        skip_reason="No API documentation framework or spec file indicators were detected.",
+    ),
+    StepDefinition(
+        "server_leaks",
+        "Server Leak & Environment Detection",
+        baseline=True,
+        reason="Server header analysis, timing metadata, and environment fingerprinting complement every scan.",
+    ),
 ]
 
 STEP_BY_KEY = {step.key: step for step in STEP_DEFINITIONS}

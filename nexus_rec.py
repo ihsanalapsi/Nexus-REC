@@ -321,6 +321,26 @@ class NexusREC:
         skip("apk", STEP_BY_KEY["apk"].skip_reason)
         skip("backend_scan", STEP_BY_KEY["backend_scan"].skip_reason)
 
+        # ── CORS Deep Scan ─────────────────────────
+        acao = headers.get("Access-Control-Allow-Origin", headers.get("access-control-allow-origin", ""))
+        if acao:
+            add("cors", STEP_BY_KEY["cors"].reason)
+        else:
+            skip("cors", STEP_BY_KEY["cors"].skip_reason)
+
+        # ── OpenAPI / Swagger ──────────────────────
+        api_doc_signals = any(
+            kw in html.lower() for kw in
+            ["swagger", "openapi", "api-docs", "redoc", "api/documentation"]
+        ) if html else False
+        if api_doc_signals or detected("Swagger", "Redocly"):
+            add("openapi", STEP_BY_KEY["openapi"].reason)
+        else:
+            skip("openapi", STEP_BY_KEY["openapi"].skip_reason)
+
+        # ── Server Leaks ───────────────────────────
+        add("server_leaks", STEP_BY_KEY["server_leaks"].reason)
+
         self._record_smart_plan(plan, reasons, skip_reasons)
 
         return plan
@@ -908,6 +928,72 @@ class NexusREC:
                         progress.console.print(f"    [dim]→ {backend_url}[/dim]")
 
                 run_registered_step('backend_scan', configure=configure_backend_scan, after=after_backend_scan)
+
+            # ── STEP 20: CORS Deep Scan ──────────────────────
+            if should_run('cors'):
+                def after_cors(_mod):
+                    cors_findings = self.results.get('cors', {})
+                    misconfigs = cors_findings.get('misconfigurations', [])
+                    if misconfigs:
+                        critical = [m for m in misconfigs if m.get('severity') == 'CRITICAL']
+                        high = [m for m in misconfigs if m.get('severity') == 'HIGH']
+                        if critical:
+                            progress.console.print(f"  [bold red]⚠ {len(critical)} CRITICAL CORS misconfiguration(s)![/bold red]")
+                        if high:
+                            progress.console.print(f"  [bold yellow]⚠ {len(high)} HIGH-severity CORS issue(s)[/bold yellow]")
+                        progress.console.print(f"  [yellow]→ {len(misconfigs)} total CORS misconfiguration(s) found[/yellow]")
+
+                run_registered_step('cors', after=after_cors)
+            else:
+                _skip("cors")
+
+            # ── STEP 21: OpenAPI / Swagger Discovery ─────────
+            if should_run('openapi'):
+                def after_openapi(_mod):
+                    oa_findings = self.results.get('openapi', {})
+                    if oa_findings.get('spec_found'):
+                        progress.console.print(f"  [green]✓ OpenAPI spec(s) found: {len(oa_findings.get('specs', []))}[/green]")
+                        total = oa_findings.get('total_endpoints', 0)
+                        progress.console.print(f"  [cyan]📊 {total} API endpoints documented in spec[/cyan]")
+                        unauth = oa_findings.get('unauthenticated_endpoints', [])
+                        if unauth:
+                            progress.console.print(f"  [bold yellow]⚠ {len(unauth)} endpoint(s) without auth requirement[/bold yellow]")
+                        sensitive = oa_findings.get('sensitive_operations', [])
+                        if sensitive:
+                            progress.console.print(f"  [bold red]🚨 {len(sensitive)} sensitive operation(s) in API spec[/bold red]")
+
+                run_registered_step('openapi', after=after_openapi)
+            else:
+                _skip("openapi")
+
+            # ── STEP 22: Server Leak & Environment Detection ─
+            if should_run('server_leaks'):
+                def after_server_leaks(_mod):
+                    sl_findings = self.results.get('server_leaks', {})
+                    leaky = sl_findings.get('leaky_headers', {})
+                    if leaky:
+                        progress.console.print(f"  [yellow]📡 {len(leaky)} leaky header(s) detected[/yellow]")
+                    env = sl_findings.get('environment_detected')
+                    if env:
+                        progress.console.print(f"  [bold cyan]🏭 Environment detected: {env}[/bold cyan]")
+                    regions = sl_findings.get('internal_regions', [])
+                    if regions:
+                        progress.console.print(f"  [dim]🌍 Internal regions/DCs: {', '.join(regions)}[/dim]")
+                    timing = sl_findings.get('server_timing_analysis', {})
+                    internal_params = timing.get('internal_params', [])
+                    if internal_params:
+                        for param in internal_params:
+                            label = param.get('internal_label', param.get('key', ''))
+                            value = param.get('value', '')
+                            progress.console.print(f"    [dim]⏱ {label}: {value}[/dim]")
+                    versions = sl_findings.get('version_disclosures', [])
+                    if versions:
+                        version_str = ', '.join(f"{v['header']}: {v['version']}" for v in versions[:3])
+                        progress.console.print(f"  [yellow]ℹ Version leaks: {version_str}[/yellow]")
+
+                run_registered_step('server_leaks', after=after_server_leaks)
+            else:
+                _skip("server_leaks")
 
             # Final summary of skipped modules
             metadata = self.results.setdefault('scan_metadata', {})

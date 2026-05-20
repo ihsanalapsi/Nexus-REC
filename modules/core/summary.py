@@ -1072,3 +1072,59 @@ def display_summary(results, domain, console):
             console.print(f"  [yellow]🔐 SAML SSO:[/yellow] {saml.get('saml_endpoint','?')}")
             if saml.get('environment'):
                 console.print(f"    [dim]Env: {saml['environment']} | Service: {saml.get('service','?')}[/dim]")
+
+    # ── CORS Deep Scan ─────────────────────────────
+    cors_data = results.get('cors', {})
+    misconfigs = cors_data.get('misconfigurations', [])
+    if misconfigs:
+        console.print("\n[bold red]⚠ CORS Deep Scan Findings:[/bold red]")
+        for m in misconfigs:
+            severity = m.get('severity', 'LOW')
+            color = "[bold red]" if severity == 'CRITICAL' else "[bold yellow]" if severity == 'HIGH' else "[yellow]"
+            console.print(f"  {color}[{severity}] {m.get('message', '')[:120]}[/]")
+
+    # ── OpenAPI Spec Discovery ─────────────────────
+    oa_data = results.get('openapi', {})
+    if oa_data.get('spec_found'):
+        console.print(f"\n[bold cyan]📜 OpenAPI/Swagger Spec Analysis:[/bold cyan]")
+        for spec in oa_data.get('specs', []):
+            console.print(f"  [cyan]📄[/cyan] {spec.get('path', '?')} ({spec.get('size', 0)} bytes)")
+            parsed = spec.get('parsed', {})
+            if parsed:
+                console.print(f"     [dim]Title: {parsed.get('title', '?')} | Version: {parsed.get('version', '?')}[/dim]")
+                console.print(f"     [dim]Endpoints: {parsed.get('total_endpoints', 0)}[/dim]")
+                unauth = parsed.get('unauthenticated_endpoints', [])
+                if unauth:
+                    console.print(f"     [bold yellow]⚠ {len(unauth)} endpoints without auth![/bold yellow]")
+                    for ep in unauth[:5]:
+                        console.print(f"       [dim]{ep['method']} {ep['path']}[/dim]")
+                sensitive = parsed.get('sensitive_operations', [])
+                if sensitive:
+                    console.print(f"     [bold red]🚨 {len(sensitive)} sensitive operations:[/bold red]")
+                    for sa in sensitive[:3]:
+                        console.print(f"       [dim]{sa['method']} {sa['path']}[/dim]")
+
+    # ── Server Leak Detection ──────────────────────
+    sl_data = results.get('server_leaks', {})
+    leaky = sl_data.get('leaky_headers', {})
+    if leaky:
+        console.print("\n[bold yellow]📡 Server Leak Analysis:[/bold yellow]")
+        env = sl_data.get('environment_detected')
+        if env:
+            console.print(f"  [cyan]🏭 Environment:[/cyan] {env}")
+        timing = sl_data.get('server_timing_analysis', {})
+        internal_params = timing.get('internal_params', [])
+        if internal_params:
+            console.print(f"  [cyan]⏱ Server Timing Leaks:[/cyan]")
+            for param in internal_params:
+                label = param.get('internal_label', param.get('key', ''))
+                value = param.get('value', '')
+                console.print(f"    [dim]{label}: {value}[/dim]")
+        versions = sl_data.get('version_disclosures', [])
+        if versions:
+            console.print(f"  [cyan]ℹ Version Disclosures:[/cyan]")
+            for v in versions[:5]:
+                console.print(f"    [dim]{v['header']}: {v['version']}[/dim]")
+        regions = sl_data.get('internal_regions', [])
+        if regions:
+            console.print(f"  [cyan]🌍 Internal Regions:[/cyan] {', '.join(regions)}")

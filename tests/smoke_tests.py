@@ -54,6 +54,44 @@ class SmartPlanSmokeTests(unittest.TestCase):
         self.assertIn("supabase_storage", plan)
         self.assertIn("backend_scan", recon.results["scan_metadata"]["smart_skip_reasons"])
 
+    def test_cors_openapi_server_leaks_included_in_plan(self):
+        recon = NexusREC("https://api.example.com")
+        recon.results = {
+            "scan_metadata": {},
+            "detected_stack": [],
+            "basic": {
+                "technologies": {},
+                "headers": {
+                    "Access-Control-Allow-Origin": "*",
+                    "Server": "Apache/2.4.41",
+                    "Server-Timing": 'dc;desc="aws-fra", cg;desc="global-production"',
+                },
+                "_html": '<html><script src="swagger-ui-bundle.js"></script></html>',
+                "waf": ["None Detected"],
+            },
+        }
+        plan = recon._build_smart_plan(allow_prompts=False)
+        self.assertIn("cors", plan)
+        self.assertIn("server_leaks", plan)
+        # openapi should be triggered because 'swagger' is in html
+
+    def test_openapi_not_included_without_signal(self):
+        recon = NexusREC("https://plain.example.com")
+        recon.results = {
+            "scan_metadata": {},
+            "detected_stack": [],
+            "basic": {
+                "technologies": {},
+                "headers": {},
+                "_html": "<html>no api docs here</html>",
+                "waf": ["None Detected"],
+            },
+        }
+        plan = recon._build_smart_plan(allow_prompts=False)
+        # openapi should be skipped because no swagger/openapi signal
+        skips = recon.results.get("scan_metadata", {}).get("smart_skip_reasons", {})
+        self.assertIn("openapi", skips)
+
     def test_security_block_limits_http_heavy_modules(self):
         recon = NexusREC("https://blocked.example")
         recon.results = {
