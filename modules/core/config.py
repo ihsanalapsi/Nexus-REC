@@ -1,4 +1,4 @@
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 SCAN_MODES = ("safe", "active", "aggressive")
 
 MODULES_REGISTRY = {
@@ -25,6 +25,9 @@ MODULES_REGISTRY = {
     'cors': 'modules.recon.web.cors.CORSDeepScanner',
     'openapi': 'modules.recon.web.openapi.OpenAPIAnalyzer',
     'server_leaks': 'modules.recon.web.server_leaks.ServerLeakDetector',
+    'api_docs': 'modules.recon.web.api_docs.APIDocsRecon',
+    'email_recon': 'modules.recon.infra.email_recon.EmailRecon',
+    'salesforce': 'modules.recon.platforms.salesforce.SalesforceRecon',
 }
 
 STACK_MODULES = {

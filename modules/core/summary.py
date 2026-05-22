@@ -1128,3 +1128,140 @@ def display_summary(results, domain, console):
         regions = sl_data.get('internal_regions', [])
         if regions:
             console.print(f"  [cyan]🌍 Internal Regions:[/cyan] {', '.join(regions)}")
+
+    # ── API Documentation Discovery ──────────────
+    api_docs_data = results.get('api_docs', {})
+    doc_pages = api_docs_data.get('doc_pages', [])
+    if doc_pages:
+        console.print("\n[bold yellow]📚 API Documentation Discovery:[/bold yellow]")
+        help_type = api_docs_data.get('help_type', 'generic')
+        console.print(f"  [cyan]📄 Type:[/cyan] {help_type}")
+        console.print(f"  [cyan]📚 Doc pages:[/cyan] {len(doc_pages)}")
+        total_eps = api_docs_data.get('total_endpoints_found', 0)
+        if total_eps:
+            console.print(f"  [bold yellow]🔗 Total endpoints: {total_eps}[/bold yellow]")
+        aspnet = api_docs_data.get('aspnet_help', {})
+        if aspnet:
+            controllers = aspnet.get('controllers', [])
+            if controllers:
+                console.print(f"  [cyan]🎮 Controllers ({len(controllers)}):[/cyan] {', '.join(controllers[:10])}")
+                if len(controllers) > 10:
+                    console.print(f"    [dim]... and {len(controllers)-10} more[/dim]")
+            unauth = aspnet.get('unauthenticated_endpoints', 0)
+            if unauth:
+                console.print(f"  [bold red]⚠ {unauth} potentially unauthenticated endpoints[/bold red]")
+        # Show first few endpoints
+        endpoints = api_docs_data.get('endpoints', [])
+        if endpoints:
+            console.print(f"  [dim]Sample endpoints:[/dim]")
+            count_display = 0
+            ep_set = set()
+            for ep in endpoints[:15]:
+                uri = ep.get('uri', ep) if isinstance(ep, dict) else str(ep)
+                method = ep.get('method', 'GET') if isinstance(ep, dict) else ''
+                key = f"{method} {uri}"
+                if key not in ep_set:
+                    ep_set.add(key)
+                    count_display += 1
+                    console.print(f"    [dim]{method:6s}[/dim] {uri}")
+            if total_eps > count_display:
+                console.print(f"    [dim]... and {total_eps - count_display} more[/dim]")
+
+    # ── Email Security Recon ──────────────────────
+    email_data = results.get('email_recon', {})
+    if email_data and isinstance(email_data, dict):
+        mx = email_data.get('mx', {})
+        spf = email_data.get('spf', {})
+        dmarc = email_data.get('dmarc', {})
+        dkim = email_data.get('dkim', {})
+        summary = email_data.get('security_summary', {})
+
+        has_email_data = any([mx, spf, dmarc, dkim])
+        if has_email_data:
+            console.print("\n[bold yellow]📧 Email Security Analysis:[/bold yellow]")
+            # MX
+            mx_records = mx.get('records', [])
+            if mx_records:
+                mx_str = '  '.join(f"{m['server']}(p{m['priority']})" for m in mx_records[:3])
+                console.print(f"  [cyan]📨 MX:[/cyan] {mx_str}")
+                if len(mx_records) > 3:
+                    console.print(f"    [dim]+ {len(mx_records)-3} more MX records[/dim]")
+                providers = mx.get('providers', [])
+                if providers:
+                    console.print(f"    [dim]Provider(s): {', '.join(providers)}[/dim]")
+
+            # SPF
+            spf_record = spf.get('record', '')
+            if spf_record:
+                color = "[green]" if spf.get('severity') == 'LOW' else "[yellow]" if spf.get('severity') == 'MEDIUM' else "[red]"
+                console.print(f"  {color}📜 SPF: {spf_record[:100]}[/]")
+                if spf.get('all_qualifier'):
+                    qual = spf['all_qualifier']
+                    qual_color = "[green]" if qual == '-all' else "[yellow]"
+                    console.print(f"    [dim]All qualifier:[/dim] {qual_color}{qual}[/]")
+            else:
+                console.print(f"  [red]📜 SPF: MISSING — domain can be spoofed[/red]")
+
+            # DMARC
+            dmarc_record = dmarc.get('record', '')
+            if dmarc_record:
+                sev = dmarc.get('severity', '')
+                pol = dmarc.get('policy', '?')
+                sev_color = "[green]" if sev == 'LOW' else "[yellow]" if sev == 'MEDIUM' else "[red]"
+                console.print(f"  {sev_color}📜 DMARC: p={pol}[/]")
+                if dmarc.get('rua'):
+                    console.print(f"    [dim]Reports: {dmarc['rua'][:60]}[/dim]")
+            else:
+                console.print(f"  [red]📜 DMARC: MISSING — no enforcement[/red]")
+
+            # DKIM
+            dkim_found = dkim.get('found', [])
+            if dkim_found:
+                console.print(f"  [green]🔑 DKIM: {len(dkim_found)} selector(s) found[/green]")
+                for d in dkim_found[:3]:
+                    console.print(f"    [dim]Selector: {d['selector']} — {d.get('record_preview', '')[:60]}[/dim]")
+
+            # Overall Score
+            score = summary.get('score')
+            if score is not None:
+                rating = summary.get('rating', '?')
+                score_color = "[bold green]" if score >= 8 else "[bold yellow]" if score >= 5 else "[bold red]"
+                console.print(f"  {score_color}📊 Email Security Score: {score}/10 ({rating})[/]")
+
+            # Issues
+            issues = summary.get('issues', [])
+            if issues:
+                for issue in issues:
+                    console.print(f"    [yellow]⚠ {issue}[/yellow]")
+            strengths = summary.get('strengths', [])
+            if strengths:
+                for s in strengths:
+                    console.print(f"    [green]✅ {s}[/green]")
+
+    # ── Salesforce Detection ──────────────────────
+    sf_data = results.get('salesforce', {})
+    if sf_data and isinstance(sf_data, dict) and sf_data.get('detected'):
+        console.print("\n[bold yellow]☁️ Salesforce Instance Detection:[/bold yellow]")
+        header_det = sf_data.get('header_detection', {}).get('headers_found', {})
+        if header_det:
+            for k, v in header_det.items():
+                console.print(f"  [cyan]📋 Header:[/cyan] {k}: {v}")
+        html_ind = sf_data.get('html_detection', {}).get('indicators', [])
+        if html_ind:
+            console.print(f"  [cyan]🔍 HTML Indicators:[/cyan] {', '.join(html_ind[:8])}")
+        subs = sf_data.get('subdomains', {}).get('subdomains', [])
+        sf_subs = [s for s in subs if s.get('is_salesforce')]
+        if sf_subs:
+            console.print(f"  [cyan]🌐 Salesforce Subdomains ({len(sf_subs)}):[/cyan]")
+            for s in sf_subs[:5]:
+                console.print(f"    [dim]{s['subdomain']}[/dim] (status: {s['status']})")
+        versions = sf_data.get('api_versions', {}).get('versions', [])
+        if versions:
+            console.print(f"  [cyan]🔢 API Versions:[/cyan]")
+            for v in versions[:5]:
+                console.print(f"    [dim]v{v['version']}[/dim] — status {v['status']}")
+        unauth = sf_data.get('unauth_endpoints', {}).get('accessible_endpoints', [])
+        if unauth:
+            console.print(f"  [bold yellow]🔓 Accessible Endpoints: {len(unauth)}[/bold yellow]")
+            for ep in unauth[:5]:
+                console.print(f"    [dim]{ep['url']}[/dim] — {ep['status']}")

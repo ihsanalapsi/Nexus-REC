@@ -217,6 +217,29 @@ STEP_DEFINITIONS = [
         baseline=True,
         reason="Server header analysis, timing metadata, and environment fingerprinting complement every scan.",
     ),
+    # ── new in v1.2.0 ─────────────────────────────────
+    StepDefinition(
+        "api_docs",
+        "API Documentation Discovery",
+        http_heavy=True,
+        smart_optional=True,
+        reason="API documentation pages (ASP.NET Help, /docs) can expose all endpoints with full signatures.",
+        skip_reason="No API documentation page signal (ASP.NET Help, /docs, /help) was detected.",
+    ),
+    StepDefinition(
+        "email_recon",
+        "Email Security & SPF/DMARC Analysis",
+        baseline=True,
+        reason="Email authentication posture (MX, SPF, DMARC, DKIM) is a foundational security check.",
+    ),
+    StepDefinition(
+        "salesforce",
+        "Salesforce Instance Detection",
+        http_heavy=True,
+        smart_optional=True,
+        reason="Salesforce indicators detected in page content, headers, or subdomains.",
+        skip_reason="No Salesforce indicators were detected in the page content, headers, or subdomains.",
+    ),
 ]
 
 STEP_BY_KEY = {step.key: step for step in STEP_DEFINITIONS}

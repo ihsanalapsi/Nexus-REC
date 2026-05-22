@@ -92,6 +92,71 @@ class SmartPlanSmokeTests(unittest.TestCase):
         skips = recon.results.get("scan_metadata", {}).get("smart_skip_reasons", {})
         self.assertIn("openapi", skips)
 
+    def test_api_docs_included_for_aspnet_signal(self):
+        """api_docs should run when ASP.NET signals are detected."""
+        recon = NexusREC("https://api.example.com")
+        recon.results = {
+            "scan_metadata": {},
+            "detected_stack": ["ASP.NET", "ASP.NET Web API"],
+            "basic": {
+                "technologies": {"ASP.NET": "4.0.30319", "IIS": "10.0"},
+                "headers": {"Server": "Microsoft-IIS/10.0"},
+                "_html": '<html><div id="help-page">ASP.NET Web API Help Page</div></html>',
+                "waf": ["None Detected"],
+            },
+        }
+        plan = recon._build_smart_plan(allow_prompts=False)
+        self.assertIn("api_docs", plan)
+
+    def test_email_recon_always_included(self):
+        """email_recon is a baseline module and should always be included."""
+        recon = NexusREC("https://example.com")
+        recon.results = {
+            "scan_metadata": {},
+            "detected_stack": [],
+            "basic": {
+                "technologies": {},
+                "headers": {},
+                "_html": "<html></html>",
+                "waf": ["None Detected"],
+            },
+        }
+        plan = recon._build_smart_plan(allow_prompts=False)
+        self.assertIn("email_recon", plan)
+
+    def test_salesforce_included_when_detected(self):
+        """Salesforce module should run when Salesforce indicators are found."""
+        recon = NexusREC("https://mydomain.com")
+        recon.results = {
+            "scan_metadata": {},
+            "detected_stack": [],
+            "basic": {
+                "technologies": {},
+                "headers": {"Server": "Salesforce"},
+                "_html": '<html>salesforce.com visualforce page</html>',
+                "waf": ["None Detected"],
+            },
+        }
+        plan = recon._build_smart_plan(allow_prompts=False)
+        self.assertIn("salesforce", plan)
+
+    def test_salesforce_skipped_without_signal(self):
+        """Salesforce module should be skipped when no indicators."""
+        recon = NexusREC("https://plain.example.com")
+        recon.results = {
+            "scan_metadata": {},
+            "detected_stack": [],
+            "basic": {
+                "technologies": {},
+                "headers": {},
+                "_html": "<html>nothing here</html>",
+                "waf": ["None Detected"],
+            },
+        }
+        plan = recon._build_smart_plan(allow_prompts=False)
+        skips = recon.results.get("scan_metadata", {}).get("smart_skip_reasons", {})
+        self.assertIn("salesforce", skips)
+
     def test_security_block_limits_http_heavy_modules(self):
         recon = NexusREC("https://blocked.example")
         recon.results = {

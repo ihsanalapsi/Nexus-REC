@@ -341,6 +341,35 @@ class NexusREC:
         # ── Server Leaks ───────────────────────────
         add("server_leaks", STEP_BY_KEY["server_leaks"].reason)
 
+        # ── API Documentation Discovery ─────────────
+        api_doc_signals_help = any(
+            kw in html.lower() for kw in
+            ["/help", "asp.net web api", "help page", "api documentation",
+             "documentation", "/docs", "/developer"]
+        ) if html else False
+        if api_doc_signals_help or detected("ASP.NET", "ASP.NET Web API", "IIS"):
+            add("api_docs", STEP_BY_KEY["api_docs"].reason)
+        else:
+            skip("api_docs", STEP_BY_KEY["api_docs"].skip_reason)
+
+        # ── Email Security (always runs - baseline) ─
+        add("email_recon", STEP_BY_KEY["email_recon"].reason)
+
+        # ── Salesforce ──────────────────────────────
+        sf_signals = any(
+            kw in html.lower() for kw in
+            ["salesforce", "force.com", "visualforce", "apex", "sfdc",
+             "lightning", "soql", "my.salesforce.com"]
+        ) if html else False
+        sf_headers = any(
+            "salesforce" in str(v).lower() or "force.com" in str(v).lower()
+            for v in headers.values()
+        ) if headers else False
+        if sf_signals or sf_headers or detected("Salesforce"):
+            add("salesforce", STEP_BY_KEY["salesforce"].reason)
+        else:
+            skip("salesforce", STEP_BY_KEY["salesforce"].skip_reason)
+
         self._record_smart_plan(plan, reasons, skip_reasons)
 
         return plan
@@ -994,6 +1023,92 @@ class NexusREC:
                 run_registered_step('server_leaks', after=after_server_leaks)
             else:
                 _skip("server_leaks")
+
+            # ── STEP 23: API Documentation Discovery ─────────
+            if should_run('api_docs'):
+                def after_api_docs(_mod):
+                    ad = self.results.get('api_docs', {})
+                    total = ad.get('total_endpoints_found', 0)
+                    if total:
+                        progress.console.print(f"  [bold yellow]📚 {total} API endpoints discovered from doc pages[/bold yellow]")
+                    doc_count = ad.get('doc_pages_discovered', 0)
+                    if doc_count:
+                        progress.console.print(f"  [cyan]→ {doc_count} documentation page(s) found[/cyan]")
+                    help_type = ad.get('help_type', '')
+                    if help_type == 'aspnet_web_api':
+                        aspnet = ad.get('aspnet_help', {})
+                        controllers = aspnet.get('controllers', [])
+                        unauth = aspnet.get('unauthenticated_endpoints', 0)
+                        if controllers:
+                            progress.console.print(f"  [cyan]→ ASP.NET Controllers ({len(controllers)}): {', '.join(controllers[:8])}[/cyan]")
+                        if unauth:
+                            progress.console.print(f"  [bold red]⚠ {unauth} endpoints potentially unauthenticated[/bold red]")
+
+                run_registered_step('api_docs', after=after_api_docs)
+            else:
+                _skip("api_docs")
+
+            # ── STEP 24: Email Security Recon ─────────────────
+            if should_run('email_recon'):
+                def after_email_recon(_mod):
+                    er = self.results.get('email_recon', {})
+                    mx = er.get('mx', {}).get('records', [])
+                    if mx:
+                        mx_servers = [f"{m['server']}({m['priority']})" for m in mx[:3]]
+                        progress.console.print(f"  [cyan]📧 MX: {', '.join(mx_servers)}[/cyan]")
+                    spf = er.get('spf', {})
+                    spf_sev = spf.get('severity', '')
+                    if spf_sev == 'HIGH':
+                        progress.console.print(f"  [bold red]⚠ SPF: {spf.get('note', 'Issue detected')}[/bold red]")
+                    elif spf_sev:
+                        progress.console.print(f"  [yellow]📜 SPF: {spf_sev} — {spf.get('note', '')[:80]}[/yellow]")
+                    dmarc = er.get('dmarc', {})
+                    dmarc_sev = dmarc.get('severity', '')
+                    if dmarc_sev == 'HIGH':
+                        progress.console.print(f"  [bold red]⚠ DMARC: {dmarc.get('note', 'Issue detected')}[/bold red]")
+                    elif dmarc_sev:
+                        progress.console.print(f"  [yellow]📜 DMARC: {dmarc_sev} — {dmarc.get('policy', '?')}[/yellow]")
+                    dkim = er.get('dkim', {})
+                    if dkim.get('total_found', 0):
+                        progress.console.print(f"  [green]🔑 DKIM: {dkim['total_found']} selector(s) found[/green]")
+                    summary = er.get('security_summary', {})
+                    if summary.get('score') is not None:
+                        score = summary['score']
+                        rating = summary.get('rating', '?')
+                        color = 'green' if score >= 8 else 'yellow' if score >= 5 else 'red'
+                        progress.console.print(f"  [bold {color}]📊 Email Security Score: {score}/10 ({rating})[/bold {color}]")
+
+                run_registered_step('email_recon', after=after_email_recon)
+            else:
+                _skip("email_recon")
+
+            # ── STEP 25: Salesforce Instance Detection ────────
+            if should_run('salesforce'):
+                def after_salesforce(_mod):
+                    sf = self.results.get('salesforce', {})
+                    if sf.get('detected'):
+                        progress.console.print(f"  [bold yellow]☁️ Salesforce detected![/bold yellow]")
+                        header_det = sf.get('header_detection', {}).get('headers_found', {})
+                        if header_det:
+                            hdr_str = '; '.join(f"{k}: {v}" for k, v in list(header_det.items())[:3])
+                            progress.console.print(f"    [dim]Headers: {hdr_str}[/dim]")
+                        html_ind = sf.get('html_detection', {}).get('indicators', [])
+                        if html_ind:
+                            progress.console.print(f"    [dim]HTML indicators: {', '.join(html_ind[:5])}[/dim]")
+                        subs = sf.get('subdomains', {}).get('subdomains', [])
+                        sf_subs = [s for s in subs if s.get('is_salesforce')]
+                        if sf_subs:
+                            progress.console.print(f"  [cyan]→ {len(sf_subs)} Salesforce subdomain(s) detected[/cyan]")
+                        versions = sf.get('api_versions', {}).get('versions', [])
+                        if versions:
+                            ver_str = ', '.join(v['version'] for v in versions[:3])
+                            progress.console.print(f"  [cyan]→ API versions: {ver_str}[/cyan]")
+                    else:
+                        progress.console.print(f"  [dim]→ No Salesforce indicators found[/dim]")
+
+                run_registered_step('salesforce', after=after_salesforce)
+            else:
+                _skip("salesforce")
 
             # Final summary of skipped modules
             metadata = self.results.setdefault('scan_metadata', {})

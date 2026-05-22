@@ -381,6 +381,137 @@ def generate_markdown_report(results, domain):
         if regions:
             lines += [f"- **Internal Regions:** {', '.join(regions)}", ""]
 
+    # ── API Documentation Discovery ──────────────────────
+    api_docs_data = results.get('api_docs', {})
+    if _completed(metadata, 'api_docs') and api_docs_data.get('doc_pages'):
+        lines += ["---", "", f"## {section_num}. API Documentation Discovery", ""]
+        section_num += 1
+        lines += [f"- **Doc pages found:** {api_docs_data.get('doc_pages_discovered', 0)}", ""]
+        lines += [f"- **Help type:** {api_docs_data.get('help_type', 'generic')}", ""]
+        total = api_docs_data.get('total_endpoints_found', 0)
+        if total:
+            lines += [f"- **Total API endpoints discovered:** {total}", ""]
+        aspnet = api_docs_data.get('aspnet_help', {})
+        if aspnet:
+            controllers = aspnet.get('controllers', [])
+            if controllers:
+                lines += [f"- **Controllers ({len(controllers)}):** {', '.join(controllers[:15])}", ""]
+            unauth = aspnet.get('unauthenticated_endpoints', 0)
+            if unauth:
+                lines += [f"- **Potentially unauthenticated endpoints:** {unauth}", ""]
+        endpoints = api_docs_data.get('endpoints', [])
+        if endpoints:
+            ep_rows = []
+            ep_set = set()
+            for ep in endpoints[:50]:
+                uri = ep.get('uri', ep) if isinstance(ep, dict) else str(ep)
+                method = ep.get('method', 'GET') if isinstance(ep, dict) else ''
+                desc = ep.get('description', '') if isinstance(ep, dict) else ''
+                if uri not in ep_set:
+                    ep_set.add(uri)
+                    ep_rows.append([method, uri, desc[:60]])
+            if ep_rows:
+                lines += ["", "### Discovered Endpoints", "",
+                          _markdown_table(["Method", "URI", "Description"], ep_rows), ""]
+            if len(endpoints) > len(ep_rows):
+                lines += [f"*... and {len(endpoints) - len(ep_rows)} more endpoints in raw JSON*", ""]
+
+    # ── Email Security Recon ────────────────────────────
+    email_data = results.get('email_recon', {})
+    if _completed(metadata, 'email_recon') and isinstance(email_data, dict):
+        has_email_data = any(key in email_data for key in ['mx', 'spf', 'dmarc', 'dkim'])
+        if has_email_data:
+            lines += ["---", "", f"## {section_num}. Email Security Analysis", ""]
+            section_num += 1
+
+            mx = email_data.get('mx', {})
+            mx_records = mx.get('records', [])
+            if mx_records:
+                mx_rows = [[str(m['priority']), m['server']] for m in mx_records]
+                lines += ["### MX Records", "", _markdown_table(["Priority", "Server"], mx_rows), ""]
+                providers = mx.get('providers', [])
+                if providers:
+                    lines += [f"- **Email Providers:** {', '.join(providers)}", ""]
+
+            spf = email_data.get('spf', {})
+            spf_record = spf.get('record', '')
+            if spf_record:
+                lines += ["### SPF Record", "",
+                          f"- **Record:** `{spf_record}`",
+                          f"- **Severity:** {spf.get('severity', '?')}",
+                          f"- **Note:** {spf.get('note', '')}", ""]
+            else:
+                lines += ["### SPF Record", "",
+                          "⚠ **SPF record is MISSING** — domain is vulnerable to email spoofing", ""]
+
+            dmarc = email_data.get('dmarc', {})
+            dmarc_str = dmarc.get('record', '')
+            if dmarc_str:
+                lines += ["### DMARC Record", "",
+                          f"- **Record:** `{dmarc_str}`",
+                          f"- **Policy:** p={dmarc.get('policy', '?')}",
+                          f"- **Severity:** {dmarc.get('severity', '?')}",
+                          f"- **Note:** {dmarc.get('note', '')}", ""]
+                if dmarc.get('rua'):
+                    lines += [f"- **Reporting (rua):** `{dmarc['rua']}`", ""]
+            else:
+                lines += ["### DMARC Record", "",
+                          "⚠ **DMARC record is MISSING** — no email authentication enforcement", ""]
+
+            dkim = email_data.get('dkim', {})
+            dkim_found = dkim.get('found', [])
+            if dkim_found:
+                dkim_rows = [[d['selector'], d.get('record_preview', '')[:100]] for d in dkim_found]
+                lines += ["### DKIM Records", "", _markdown_table(["Selector", "Record Preview"], dkim_rows), ""]
+            else:
+                lines += ["### DKIM Records", "",
+                          "ℹ No DKIM records found with common selectors", ""]
+
+            summary = email_data.get('security_summary', {})
+            score = summary.get('score')
+            if score is not None:
+                lines += [f"### Email Security Score: {score}/10 ({summary.get('rating', '?')})", ""]
+                issues = summary.get('issues', [])
+                if issues:
+                    for issue in issues:
+                        lines += [f"- ⚠ {issue}", ""]
+                strengths = summary.get('strengths', [])
+                if strengths:
+                    for s in strengths:
+                        lines += [f"- ✅ {s}", ""]
+
+    # ── Salesforce Detection ──────────────────────────
+    sf_data = results.get('salesforce', {})
+    if _completed(metadata, 'salesforce') and isinstance(sf_data, dict) and sf_data.get('detected'):
+        lines += ["---", "", f"## {section_num}. Salesforce Instance Detection", ""]
+        section_num += 1
+
+        header_det = sf_data.get('header_detection', {}).get('headers_found', {})
+        if header_det:
+            hdr_rows = [[k, v] for k, v in header_det.items()]
+            lines += ["### Headers", "", _markdown_table(["Header", "Value"], hdr_rows), ""]
+
+        html_ind = sf_data.get('html_detection', {}).get('indicators', [])
+        if html_ind:
+            lines += [f"- **HTML Indicators:** {', '.join(html_ind)}", ""]
+
+        subs = sf_data.get('subdomains', {}).get('subdomains', [])
+        sf_subs = [s for s in subs if s.get('is_salesforce')]
+        if sf_subs:
+            sub_rows = [[s['subdomain'], str(s['status'])] for s in sf_subs]
+            lines += ["### Salesforce Subdomains", "", _markdown_table(["Subdomain", "Status"], sub_rows), ""]
+
+        versions = sf_data.get('api_versions', {}).get('versions', [])
+        if versions:
+            ver_rows = [[v.get('version', '?'), str(v.get('status', '?')), v.get('source', '?')] for v in versions]
+            lines += ["### API Versions", "", _markdown_table(["Version", "Status", "Source"], ver_rows), ""]
+
+        unauth = sf_data.get('unauth_endpoints', {}).get('accessible_endpoints', [])
+        if unauth:
+            ua_rows = [[ep.get('url', '?'), str(ep.get('status', '?'))] for ep in unauth]
+            lines += ["### Potentially Accessible Endpoints", "",
+                      _markdown_table(["URL", "Status"], ua_rows), ""]
+
     lines += [
         "---",
         "",
