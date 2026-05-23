@@ -370,6 +370,36 @@ class NexusREC:
         else:
             skip("salesforce", STEP_BY_KEY["salesforce"].skip_reason)
 
+        # ── New: Registration Security ────────────────
+        reg_signals = any(
+            kw in html.lower() for kw in
+            ["register", "signup", "create account", "auth/register", "/sign-up"]
+        ) if html else False
+        if reg_signals or detected("Auth", "ASP.NET"):
+            add("registration", STEP_BY_KEY["registration"].reason)
+        else:
+            skip("registration", STEP_BY_KEY["registration"].skip_reason)
+
+        # ── New: Azure Cloud ──────────────────────────
+        azure_signals = any(
+            kw in html.lower() for kw in
+            ["azure", "azurewebsites", "azurestaticapps"]
+        ) if html else False
+        if azure_signals or detected("IIS", "ASP.NET", "Azure"):
+            add("azure_cloud", STEP_BY_KEY["azure_cloud"].reason)
+        else:
+            add("azure_cloud", "Azure/Azure-adjacent infrastructure is common; lightweight probe is baseline-safe.")
+
+        # ── New: Auth Security Scanner ────────────────
+        api_signals = any(
+            kw in html.lower() for kw in
+            ["/api/", "/api/v1", "application/json", "graphql", "endpoint"]
+        ) if html else False
+        if api_signals or reg_signals or detected("ASP.NET", "Next.js", "API"):
+            add("auth_security", STEP_BY_KEY["auth_security"].reason)
+        else:
+            skip("auth_security", STEP_BY_KEY["auth_security"].skip_reason)
+
         self._record_smart_plan(plan, reasons, skip_reasons)
 
         return plan
@@ -1109,6 +1139,105 @@ class NexusREC:
                 run_registered_step('salesforce', after=after_salesforce)
             else:
                 _skip("salesforce")
+
+            # ── NEW STEP 26: Registration Security ─────────────
+            if should_run('registration'):
+                def after_registration(_mod):
+                    reg = self.results.get('registration', {})
+                    elevated = reg.get('elevated_role_registration', {})
+                    if isinstance(elevated, dict) and elevated.get('skipped'):
+                        pass
+                    elif isinstance(elevated, list):
+                        vuln = [e for e in elevated if e.get('vulnerable')]
+                        if vuln:
+                            progress.console.print(f"  [bold red]🚨 Role escalation: {len(vuln)} endpoint(s) accepted elevated role![/bold red]")
+                            for v in vuln[:3]:
+                                progress.console.print(f"    [red]  {v.get('endpoint','')} → role={v.get('role_attempted','')} ({v.get('jwt_role','?')})[/red]")
+                    safe = reg.get('safe_registration', [])
+                    if isinstance(safe, list) and safe:
+                        success = [s for s in safe if s.get('success')]
+                        if success:
+                            progress.console.print(f"  [yellow]⚠ Registration works: {len(success)} endpoint(s) accepted user registration[/yellow]")
+                    otp = reg.get('otp_requirement', [])
+                    if otp:
+                        for o in otp:
+                            if o.get('otp_required') == False:
+                                progress.console.print(f"  [bold red]🚨 No OTP: {o.get('endpoint','')} — phone not confirmed[/bold red]")
+                    endpoints = reg.get('register_endpoints', [])
+                    if endpoints:
+                        progress.console.print(f"  [cyan]→ {len(endpoints)} registration endpoint(s) discovered[/cyan]")
+                    else:
+                        progress.console.print(f"  [dim]→ No registration endpoints found[/dim]")
+
+                run_registered_step('registration', after=after_registration)
+            else:
+                _skip("registration")
+
+            # ── NEW STEP 27: Azure Cloud Detection ─────────────
+            if should_run('azure_cloud'):
+                def after_azure_cloud(_mod):
+                    az = self.results.get('azure_cloud', {})
+                    app_svc = az.get('azure_app_service', [])
+                    if app_svc:
+                        progress.console.print(f"  [cyan]☁️ Azure App Service: {len(app_svc)} signature(s) detected[/cyan]")
+                        for a in app_svc[:3]:
+                            if a.get('type') == 'ip_restriction':
+                                progress.console.print(
+                                    f"    [bold red]🚫 IP Restriction: {a.get('blocked_ip','?')} is blocked[/bold red]"
+                                )
+                            else:
+                                progress.console.print(f"    [dim]{a.get('detected_by','')}[/dim]")
+                    front_door = az.get('azure_front_door', {})
+                    if front_door.get('detected'):
+                        progress.console.print(f"  [yellow]🚪 Azure Front Door detected[/yellow]")
+                    blob = az.get('azure_blob_storage', [])
+                    if blob:
+                        progress.console.print(f"  [cyan]📦 Azure Blob Storage: {len(blob)} account(s) found[/cyan]")
+                        for b in blob[:2]:
+                            progress.console.print(f"    [dim]{b.get('url','')} (HTTP {b.get('status','?')})[/dim]")
+                    subdomains = az.get('app_service_subdomains', [])
+                    if isinstance(subdomains, list) and subdomains:
+                        progress.console.print(f"  [cyan]→ {len(subdomains)} Azure subdomain(s) resolved[/cyan]")
+                    ip_r = az.get('ip_restriction', [])
+                    if ip_r:
+                        for ir in ip_r:
+                            progress.console.print(f"  [bold red]🚫 IP Blocked: {ir.get('path','')} — {ir.get('mechanism','?')}[/bold red]")
+
+                run_registered_step('azure_cloud', after=after_azure_cloud)
+            else:
+                _skip("azure_cloud")
+
+            # ── NEW STEP 28: Auth Security Scanner ──────────────
+            if should_run('auth_security'):
+                def after_auth_security(_mod):
+                    aus = self.results.get('auth_security', {})
+                    pii = aus.get('unauthenticated_pii_leak', [])
+                    if isinstance(pii, list) and pii:
+                        pii_critical = [p for p in pii if p.get('pii_detected')]
+                        if pii_critical:
+                            progress.console.print(
+                                f"  [bold red]🔴 PII LEAK: {len(pii_critical)} endpoint(s) leak PII without auth![/bold red]"
+                            )
+                            for p in pii_critical[:3]:
+                                fields = ', '.join(p.get('pii_fields', [])[:3])
+                                progress.console.print(
+                                    f"    [red]  {p.get('endpoint','')} → {fields}[/red]"
+                                )
+                        pii_info = [p for p in pii if not p.get('pii_detected') and p.get('status') in [200, 201]]
+                        if pii_info:
+                            progress.console.print(f"  [yellow]⚠ {len(pii_info)} endpoint(s) respond without auth (no PII detected)[/yellow]")
+                    admin_exp = aus.get('admin_endpoint_exposure', [])
+                    if admin_exp:
+                        progress.console.print(f"  [yellow]🔐 {len(admin_exp)} admin endpoint(s) accessible[/yellow]")
+                    auth_enforce = aus.get('api_auth_enforcement', [])
+                    if auth_enforce:
+                        no_auth = [a for a in auth_enforce if a.get('status_noauth') not in [401, 403, 404, 'error']]
+                        if no_auth:
+                            progress.console.print(f"  [yellow]⚠ {len(no_auth)} endpoint(s) accessible without auth header[/yellow]")
+
+                run_registered_step('auth_security', after=after_auth_security)
+            else:
+                _skip("auth_security")
 
             # Final summary of skipped modules
             metadata = self.results.setdefault('scan_metadata', {})

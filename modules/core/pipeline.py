@@ -240,6 +240,31 @@ STEP_DEFINITIONS = [
         reason="Salesforce indicators detected in page content, headers, or subdomains.",
         skip_reason="No Salesforce indicators were detected in the page content, headers, or subdomains.",
     ),
+    # ── new: Registration Security ─────────────────────
+    StepDefinition(
+        "registration",
+        "Registration Security Analysis",
+        http_heavy=True,
+        smart_optional=True,
+        reason="Registration/Auth endpoints detected; check for OTP bypass and role escalation.",
+        skip_reason="No registration or authentication endpoints were discovered on the target.",
+    ),
+    # ── new: Azure Cloud Recon ─────────────────────────
+    StepDefinition(
+        "azure_cloud",
+        "Azure Cloud Infrastructure Detection",
+        baseline=True,
+        reason="Azure cloud services (App Service, Blob, Front Door) can expose infrastructure details.",
+    ),
+    # ── new: Auth Security Scanner ─────────────────────
+    StepDefinition(
+        "auth_security",
+        "Auth Security & PII Leak Scanner",
+        http_heavy=True,
+        smart_optional=True,
+        reason="API endpoints detected; probe for unauthenticated PII leaks and admin endpoint exposure.",
+        skip_reason="No API endpoints or authorization signals were detected on the target.",
+    ),
 ]
 
 STEP_BY_KEY = {step.key: step for step in STEP_DEFINITIONS}

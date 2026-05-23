@@ -512,6 +512,160 @@ def generate_markdown_report(results, domain):
             lines += ["### Potentially Accessible Endpoints", "",
                       _markdown_table(["URL", "Status"], ua_rows), ""]
 
+    # ── Registration Security ──────────────────────────
+    reg_data = results.get('registration', {})
+    if _completed(metadata, 'registration') and isinstance(reg_data, dict):
+        has_reg_data = any(v for v in reg_data.values() if v)
+        if has_reg_data:
+            lines += ["---", "", f"## {section_num}. Registration Security Analysis", ""]
+            section_num += 1
+
+            endpoints = reg_data.get('register_endpoints', [])
+            if endpoints:
+                ep_rows = [[e.get('url', e.get('endpoint', '?')), str(e.get('status', '?'))] for e in endpoints]
+                lines += ["### Discovered Registration Endpoints", "",
+                          _markdown_table(["Endpoint", "Status"], ep_rows), ""]
+
+            safe = reg_data.get('safe_registration', [])
+            if isinstance(safe, list) and safe:
+                for s in safe:
+                    ep = s.get('endpoint', s.get('url', '?'))
+                    success = s.get('success', False)
+                    role = s.get('role', '?')
+                    otp = s.get('otp_required', '?')
+                    if success:
+                        lines.append(f"- ✅ **Registration succeeded** at `{ep}` (role={role}, OTP required={otp})")
+                    else:
+                        lines.append(f"- ℹ Registration registered at `{ep}` (success={success}, role={role})")
+                lines.append("")
+
+            elevated = reg_data.get('elevated_role_registration', {})
+            if isinstance(elevated, dict) and not elevated.get('skipped'):
+                ep = elevated.get('endpoint', '?')
+                role = elevated.get('role_attempted', '?')
+                vuln = elevated.get('vulnerable', False)
+                jwt_role = elevated.get('jwt_role', '?')
+                if vuln:
+                    lines += [f"- 🔴 **Role Escalation** at `{ep}`: role={role} → JWT role=`{jwt_role}`"]
+                else:
+                    lines += [f"- ℹ Elevated role attempted at `{ep}` (role={role}) was blocked"]
+                lines.append("")
+            elif isinstance(elevated, list):
+                for e in elevated:
+                    ep = e.get('endpoint', '?')
+                    role = e.get('role_attempted', '?')
+                    vuln = e.get('vulnerable', False)
+                    if vuln:
+                        lines += [f"- 🔴 **Role Escalation** at `{ep}`: role={role} granted"]
+                    else:
+                        lines += [f"- ℹ Role blocked at `{ep}`: role={role} rejected"]
+                lines.append("")
+
+            otp = reg_data.get('otp_requirement', [])
+            if otp:
+                for o in otp:
+                    ep = o.get('endpoint', '?')
+                    otp_req = o.get('otp_required', True)
+                    if otp_req is False:
+                        lines.append(f"- 🔴 **OTP bypass** at `{ep}`: registration without phone confirmation")
+                    else:
+                        lines.append(f"- ℹ OTP required at `{ep}`")
+                lines.append("")
+
+    # ── Azure Cloud Recon ──────────────────────────
+    az_data = results.get('azure_cloud', {})
+    if _completed(metadata, 'azure_cloud') and isinstance(az_data, dict):
+        has_az_data = any(v for v in az_data.values() if v)
+        if has_az_data:
+            lines += ["---", "", f"## {section_num}. Azure Cloud Infrastructure", ""]
+            section_num += 1
+
+            app_svc = az_data.get('azure_app_service', [])
+            if app_svc:
+                as_rows = []
+                for a in app_svc:
+                    detected_by = a.get('detected_by', '?')
+                    a_type = a.get('type', '')
+                    if a_type == 'ip_restriction':
+                        blocked_ip = a.get('blocked_ip', '?')
+                        as_rows.append(["🚫 IP Restriction", blocked_ip, detected_by])
+                    elif a_type == 'header':
+                        as_rows.append(["📋 Header", a.get('header', '?'), detected_by])
+                    else:
+                        as_rows.append(["ℹ", detected_by, ''])
+                lines += ["### Azure App Service", "",
+                          _markdown_table(["Type", "Detail", "Source"], as_rows), ""]
+
+            front_door = az_data.get('azure_front_door', {})
+            if front_door.get('detected'):
+                fd_rows = [[k, str(v)] for k, v in front_door.items() if k != 'detected']
+                lines += ["### Azure Front Door", "",
+                          _markdown_table(["Key", "Value"], fd_rows), ""]
+
+            blob = az_data.get('azure_blob_storage', [])
+            if blob:
+                blob_rows = [[b.get('url', '?'), str(b.get('status', '?')), b.get('accessible', '?')] for b in blob]
+                lines += ["### Azure Blob Storage", "",
+                          _markdown_table(["URL", "HTTP Status", "Accessible"], blob_rows), ""]
+
+            blob_subs = az_data.get('blob_subdomains', [])
+            if blob_subs:
+                lines.append(f"- **Blob subdomains probed:** {len(blob_subs)}")
+                lines.append("")
+
+            ip_r = az_data.get('ip_restriction', [])
+            if ip_r:
+                ip_rows = [[ir.get('path', '?'), ir.get('mechanism', '?'), str(ir.get('status', '?'))] for ir in ip_r]
+                lines += ["### IP Restrictions Detected", "",
+                          _markdown_table(["Path", "Mechanism", "Status"], ip_rows), ""]
+
+            cfg = az_data.get('app_service_configuration', {})
+            if cfg:
+                cfg_rows = [[k, str(v)] for k, v in cfg.items()]
+                lines += ["### App Service configuration", "",
+                          _markdown_table(["Setting", "Value"], cfg_rows), ""]
+
+    # ── Auth Security Scanner ──────────────────────────
+    aus_data = results.get('auth_security', {})
+    if _completed(metadata, 'auth_security') and isinstance(aus_data, dict):
+        has_aus_data = any(v for v in aus_data.values() if v)
+        if has_aus_data:
+            lines += ["---", "", f"## {section_num}. Auth Security & PII Leak Analysis", ""]
+            section_num += 1
+
+            pii = aus_data.get('unauthenticated_pii_leak', [])
+            if isinstance(pii, list) and pii:
+                pii_critical = [p for p in pii if p.get('pii_detected')]
+                if pii_critical:
+                    pii_rows = []
+                    for p in pii_critical:
+                        fields = ', '.join(p.get('pii_fields', [])[:5])
+                        pii_rows.append([p.get('endpoint', '?'), str(p.get('status', '?')), fields])
+                    lines += [f"### 🔴 Unauthenticated PII Leak ({len(pii_critical)})", "",
+                              _markdown_table(["Endpoint", "Status", "PII Fields"], pii_rows), ""]
+                resp_only = [p for p in pii if not p.get('pii_detected') and p.get('status') in [200, 201]]
+                if resp_only:
+                    lines += [f"### ℹ Unauthenticated Access (no PII confirmed) — {len(resp_only)} endpoints", ""]
+                    for r in resp_only[:5]:
+                        lines.append(f"- `{r.get('endpoint','?')}` (HTTP {r.get('status','?')})")
+                    lines.append("")
+
+            admin_exp = aus_data.get('admin_endpoint_exposure', [])
+            if admin_exp:
+                exp_rows = [[a.get('endpoint', a.get('url', '?')), str(a.get('status', '?')), str(a.get('accessible', '?'))] for a in admin_exp]
+                lines += ["### Admin Endpoint Exposure", "",
+                          _markdown_table(["Endpoint", "Status", "Accessible"], exp_rows), ""]
+
+            auth_enforce = aus_data.get('api_auth_enforcement', [])
+            if auth_enforce:
+                auth_rows = []
+                for a in auth_enforce:
+                    status_noauth = a.get('status_noauth', '?')
+                    accessible = "Yes" if status_noauth not in [401, 403, 404, 'error'] else "No"
+                    auth_rows.append([a.get('endpoint', a.get('url', '?')), str(status_noauth), accessible])
+                lines += ["### API Auth Enforcement", "",
+                          _markdown_table(["Endpoint", "Status (No Auth)", "Accessible"], auth_rows), ""]
+
     lines += [
         "---",
         "",

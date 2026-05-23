@@ -54,6 +54,19 @@ LEAKY_HEADERS = [
     "X-Datadog-Trace-Id",
     "X-Datadog-Sampling-Priority",
     "X-Datadog-Span-Id",
+    # Azure-specific leaky headers
+    "X-MS-Forbidden-IP",
+    "X-MS-Proxy-App-ID",
+    "X-MS-Proxy-Group-ID",
+    "X-MS-Proxy-Subscription-ID",
+    "X-MS-Proxy-Data-Center",
+    "X-MS-Request-ID",
+    "X-MS-Client-Request-Id",
+    "X-MS-Request-Chain",
+    "ARRAffinity",
+    "Request-Context",
+    "X-Azure-Ref",
+    "X-Frontdoor-ID",
 ]
 
 # Server timing parameter patterns that indicate internal info
@@ -149,6 +162,48 @@ class ServerLeakDetector:
         versions = self._collect_version_disclosures(headers, leaky)
         findings["version_disclosures"] = versions
         findings["total_leaks"] += len(versions)
+
+        # 5. Azure-specific security header detection
+        azure_findings = []
+        forbidden_ip = headers.get("X-MS-Forbidden-IP", "")
+        if forbidden_ip:
+            azure_findings.append({
+                "type": "azure_ip_restriction",
+                "header": "X-MS-Forbidden-IP",
+                "value": forbidden_ip,
+                "note": "Azure App Service IP Restriction is active — this IP is blocked",
+            })
+            findings["total_leaks"] += 1
+
+        arraffinity = headers.get("ARRAffinity", "")
+        if arraffinity:
+            azure_findings.append({
+                "type": "azure_affinity_cookie",
+                "header": "ARRAffinity",
+                "value": arraffinity[:20] + "...",
+                "note": "Azure App Service request affinity — backend routing info",
+            })
+
+        request_context = headers.get("Request-Context", "")
+        if request_context:
+            azure_findings.append({
+                "type": "azure_app_insights",
+                "header": "Request-Context",
+                "value": request_context[:80],
+                "note": "Azure Application Insights tracking header",
+            })
+
+        x_azure_ref = headers.get("X-Azure-Ref", "")
+        if x_azure_ref:
+            azure_findings.append({
+                "type": "azure_front_door",
+                "header": "X-Azure-Ref",
+                "value": x_azure_ref[:40],
+                "note": "Azure Front Door CDN — request reference ID",
+            })
+
+        if azure_findings:
+            findings["azure_security_headers"] = azure_findings
 
         self.results = findings
         return self.results

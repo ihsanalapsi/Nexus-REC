@@ -1265,3 +1265,104 @@ def display_summary(results, domain, console):
             console.print(f"  [bold yellow]🔓 Accessible Endpoints: {len(unauth)}[/bold yellow]")
             for ep in unauth[:5]:
                 console.print(f"    [dim]{ep['url']}[/dim] — {ep['status']}")
+
+    # ── New: Registration Security Summary ─────────────────
+    reg_data = results.get('registration', {})
+    if reg_data:
+        console.print()
+        console.print(Panel.fit("[bold]🔐 Registration Security Analysis[/bold]", border_style="cyan"))
+        reg_endpoints = reg_data.get('register_endpoints', [])
+        if reg_endpoints:
+            console.print(f"  [cyan]📋 Registration endpoints: {len(reg_endpoints)}[/cyan]")
+            for ep in reg_endpoints[:5]:
+                console.print(f"    [dim]{ep.get('url','')} (HTTP {ep.get('status','?')})[/dim]")
+        safe_reg = reg_data.get('safe_registration', [])
+        if isinstance(safe_reg, list) and safe_reg:
+            success = [s for s in safe_reg if s.get('success')]
+            if success:
+                console.print(f"  [yellow]⚠ Registration succeeded: {len(success)} endpoint(s) accept POST[/yellow]")
+                for s in success[:3]:
+                    console.print(f"    [dim]{s.get('endpoint','')} → role={s.get('role_used','')}[/dim]")
+        elif isinstance(safe_reg, dict) and safe_reg.get('skipped'):
+            console.print(f"  [dim]⏭ Safe registration test skipped (use active mode)[/dim]")
+        elevated = reg_data.get('elevated_role_registration', [])
+        if isinstance(elevated, list) and elevated:
+            vuln = [e for e in elevated if e.get('vulnerable')]
+            if vuln:
+                console.print(f"  [bold red]🚨 Role escalation: {len(vuln)} endpoint(s) accept elevated roles![/bold red]")
+                for v in vuln[:3]:
+                    jwt_role = v.get('jwt_role', '?')
+                    phone_conf = v.get('phone_confirmed', '?')
+                    console.print(f"    [red]{v.get('endpoint','')} → role={v.get('role_attempted','')} (JWT: {jwt_role}, confirmed: {phone_conf})[/red]")
+        elif isinstance(elevated, dict) and elevated.get('skipped'):
+            console.print(f"  [dim]⏭ Role escalation test skipped (use aggressive mode)[/dim]")
+        otp = reg_data.get('otp_requirement', [])
+        if otp:
+            for o in otp:
+                if o.get('otp_required') == False:
+                    console.print(f"  [bold red]🚨 No OTP: {o.get('endpoint','')} — phone not confirmed[/bold red]")
+        if not reg_endpoints and not safe_reg and not elevated:
+            console.print(f"  [dim]→ No registration security issues detected[/dim]")
+
+    # ── New: Azure Cloud Summary ──────────────────────────
+    azure_data = results.get('azure_cloud', {})
+    if azure_data:
+        console.print()
+        console.print(Panel.fit("[bold]☁️ Azure Cloud Detection[/bold]", border_style="cyan"))
+        app_svc = azure_data.get('azure_app_service', [])
+        if app_svc:
+            console.print(f"  [cyan]🏗 Azure App Service: {len(app_svc)} signature(s)[/cyan]")
+            for a in app_svc[:3]:
+                icon = "🚫" if a.get('type') == 'ip_restriction' else "ℹ️"
+                console.print(f"    [{icon}] {a.get('detected_by','')}")
+                if a.get('blocked_ip'):
+                    console.print(f"    [bold red]     Blocked IP: {a['blocked_ip']}[/bold red]")
+        front_door = azure_data.get('azure_front_door', {})
+        if front_door.get('detected'):
+            console.print(f"  [yellow]🚪 Azure Front Door detected[/yellow]")
+        blob = azure_data.get('azure_blob_storage', [])
+        if blob:
+            console.print(f"  [cyan]📦 Azure Blob: {len(blob)} account(s)[/cyan]")
+            for b in blob[:3]:
+                console.print(f"    [dim]{b.get('url','')} (HTTP {b.get('status','?')})[/dim]")
+        subdomains = azure_data.get('app_service_subdomains', [])
+        if isinstance(subdomains, list) and subdomains:
+            console.print(f"  [cyan]→ {len(subdomains)} Azure subdomain(s) found[/cyan]")
+        ip_r = azure_data.get('ip_restriction', [])
+        if ip_r:
+            for ir in ip_r:
+                console.print(f"  [bold red]🚫 Blocked path: {ir.get('path','')} — {ir.get('mechanism','?')}[/bold red]")
+        if not app_svc and not blob and not front_door:
+            console.print(f"  [dim]→ No Azure cloud services detected[/dim]")
+
+    # ── New: Auth Security Summary ────────────────────────
+    auth_data = results.get('auth_security', {})
+    if auth_data:
+        console.print()
+        console.print(Panel.fit("[bold]🔑 Auth Security & PII Leak Scan[/bold]", border_style="cyan"))
+        pii = auth_data.get('unauthenticated_pii_leak', [])
+        if isinstance(pii, list) and pii:
+            critical = [p for p in pii if p.get('pii_detected')]
+            if critical:
+                console.print(f"  [bold red]🔴 PII LEAK: {len(critical)} endpoint(s) leak PII without auth![/bold red]")
+                for p in critical[:3]:
+                    console.print(f"    [red]{p.get('endpoint','')} → {', '.join(p.get('pii_fields',[])[:3])}[/red]")
+            info = [p for p in pii if not p.get('pii_detected') and p.get('status') in [200, 201]]
+            if info:
+                console.print(f"  [yellow]⚠ {len(info)} endpoint(s) respond without auth (no PII)[/yellow]")
+        elif isinstance(pii, dict) and pii.get('skipped'):
+            console.print(f"  [dim]⏭ PII leak test skipped (use active mode)[/dim]")
+        admin_exp = auth_data.get('admin_endpoint_exposure', [])
+        if admin_exp:
+            console.print(f"  [yellow]🔐 Admin endpoints accessible: {len(admin_exp)}[/yellow]")
+            for a in admin_exp[:5]:
+                console.print(f"    [dim]{a.get('path','')} (HTTP {a.get('status','?')})[/dim]")
+        auth_enforce = auth_data.get('api_auth_enforcement', [])
+        if auth_enforce:
+            no_auth = [a for a in auth_enforce if a.get('status_noauth') not in [401, 403, 404, 'error']]
+            if no_auth:
+                console.print(f"  [yellow]⚠ {len(no_auth)} endpoint(s) accessible without auth header[/yellow]")
+                for na in no_auth[:5]:
+                    console.print(f"    [dim]{na.get('path','')} (HTTP {na.get('status_noauth','?')})[/dim]")
+        if not pii and not admin_exp:
+            console.print(f"  [dim]→ No auth security issues detected[/dim]")

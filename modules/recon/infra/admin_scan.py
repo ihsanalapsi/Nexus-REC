@@ -164,6 +164,32 @@ class AdminScanRecon:
         self.results['admin_paths'] = findings
         return findings
 
+    def _detect_angular_admin_panel(self, text, title):
+        """Detect Angular-based admin panels by framework signatures."""
+        angular_signals = []
+        if '<app-root>' in text or '<app-root ' in text:
+            angular_signals.append('app-root')
+        if 'ng-version=' in text:
+            angular_signals.append('ng-version')
+        if 'ng-app=' in text or 'ng-app ' in text:
+            angular_signals.append('ng-app')
+        if 'MatToolbar' in text or 'mat-toolbar' in text:
+            angular_signals.append('Angular Material')
+        if '<router-outlet>' in text:
+            angular_signals.append('router-outlet')
+        if 'main-es' in text and '.js' in text:
+            angular_signals.append('Angular CLI bundle')
+        if 'polyfills-es' in text:
+            angular_signals.append('Angular polyfills')
+        if 'styles-es' in text:
+            angular_signals.append('Angular styles')
+        if 'vendor-es' in text:
+            angular_signals.append('Angular vendor bundle')
+        if title and ('admin' in title.lower() or 'panel' in title.lower()
+                      or 'dashboard' in title.lower() or 'مدير' in title.lower()):
+            angular_signals.append(f"admin_title:'{title[:50]}'")
+        return angular_signals if len(angular_signals) >= 2 else (angular_signals[:1] if angular_signals else [])
+
     def probe_admin_technologies(self, admin_url):
         tech = {}
         try:
@@ -171,6 +197,7 @@ class AdminScanRecon:
                 headers={'User-Agent': 'Mozilla/5.0'})
             text = r.text
             headers = r.headers
+            title = self._extract_title(text)
 
             if 'wp-admin' in text or 'wp-login' in text or 'wordpress' in text.lower():
                 tech['cms'] = 'WordPress'
@@ -190,6 +217,21 @@ class AdminScanRecon:
 
             if 'ASP.NET' in text or '__VIEWSTATE' in text:
                 tech['framework'] = 'ASP.NET'
+
+            # Angular admin panel detection
+            angular_signals = self._detect_angular_admin_panel(text, title)
+            if angular_signals:
+                tech['framework'] = 'Angular'
+                tech['angular_signals'] = angular_signals
+                tech['is_spa_admin'] = True
+
+            # React admin panel detection
+            if 'data-reactroot' in text or 'data-reactid' in text:
+                if not tech.get('framework'):
+                    tech['framework'] = 'React'
+                tech['react_signals'] = ['data-reactroot/data-reactid']
+                if title and ('admin' in title.lower() or 'panel' in title.lower()):
+                    tech['is_spa_admin'] = True
 
             if 'X-Powered-By' in headers:
                 tech['powered_by'] = headers['X-Powered-By']

@@ -110,6 +110,10 @@ class CookieRecon:
                         'has_user_pass': 'user' in payload_json or 'pass' in payload_json or 'password' in payload_json or 'username' in payload_json,
                         'has_cred_fields': any(k in payload_json for k in ['user', 'pass', 'password', 'username', 'token', 'secret', 'key', 'email']),
                     }
+
+                    # Role & permission analysis
+                    self._analyze_jwt_roles(payload_json, findings, entry)
+
                     if cracked_secret:
                         entry['hs256_cracked'] = True
                         entry['hs256_secret'] = cracked_secret
@@ -150,6 +154,45 @@ class CookieRecon:
                     break
         except:
             pass
+
+    def _analyze_jwt_roles(self, payload, findings, entry):
+        """Analyze JWT payload for role and permission claims."""
+        # Role claims: check multiple naming conventions
+        role_keys = [
+            'role', 'roles', 'Role', 'permission', 'permissions',
+            'http://schemas.microsoft.com/ws/2008/06/identity/claims/role',
+            'http://schemas.microsoft.com/ws/2008/06/identity/claims/roles',
+            'is_admin', 'isAdmin', 'is_superuser', 'isSuperuser',
+            'access_level', 'accessLevel', 'user_type', 'userType',
+        ]
+        found_roles = {}
+        for key in role_keys:
+            if key in payload:
+                found_roles[key] = payload[key]
+
+        if found_roles:
+            role_analysis = {'claims_found': found_roles}
+            val = str(list(found_roles.values())[0]).lower()
+            elevated = any(r in val for r in ['admin', 'super', 'owner', 'root', 'manager'])
+            role_analysis['has_elevated_role'] = elevated
+
+            # Check for elevation risk
+            if elevated:
+                role_analysis['risk'] = 'JWT contains elevated role claim'
+                # Check if SMS/phone was confirmed (weak registration)
+                phone_confirmed = payload.get(
+                    'phone_number_confirmed',
+                    payload.get('phoneNumberConfirmed', payload.get('phone_confirmed', 'unknown'))
+                )
+                if phone_confirmed == False or phone_confirmed == 'false' or phone_confirmed is False:
+                    role_analysis['phone_confirmed'] = False
+                    role_analysis[
+                        'vulnerability'
+                    ] = "Elevated role with unconfirmed phone — possible no-OTP registration bypass"
+                    entry['role_vulnerability'] = role_analysis['vulnerability']
+
+            entry['role_analysis'] = role_analysis
+            findings.setdefault('role_analysis', []).append(role_analysis)
 
     COMMON_JWT_SECRETS = [
         'secret', 'supersecret', 'password', '123456', 'admin',

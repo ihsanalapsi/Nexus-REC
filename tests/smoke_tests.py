@@ -157,6 +157,54 @@ class SmartPlanSmokeTests(unittest.TestCase):
         skips = recon.results.get("scan_metadata", {}).get("smart_skip_reasons", {})
         self.assertIn("salesforce", skips)
 
+    def test_registration_security_included_with_auth_signals(self):
+        """Registration module should run when login/register signals are found."""
+        recon = NexusREC("https://auth.example.com")
+        recon.results = {
+            "scan_metadata": {},
+            "detected_stack": ["ASP.NET"],
+            "basic": {
+                "technologies": {"ASP.NET": "4.0", "IIS": "10.0"},
+                "headers": {"Server": "Microsoft-IIS/10.0"},
+                "_html": '<html><a href="/register">Create Account</a></html>',
+                "waf": ["None Detected"],
+            },
+        }
+        plan = recon._build_smart_plan(allow_prompts=False)
+        self.assertIn("registration", plan)
+
+    def test_azure_cloud_always_runs(self):
+        """Azure cloud is baseline and should always be included."""
+        recon = NexusREC("https://example.com")
+        recon.results = {
+            "scan_metadata": {},
+            "detected_stack": [],
+            "basic": {
+                "technologies": {},
+                "headers": {},
+                "_html": "<html></html>",
+                "waf": ["None Detected"],
+            },
+        }
+        plan = recon._build_smart_plan(allow_prompts=False)
+        self.assertIn("azure_cloud", plan)
+
+    def test_auth_security_included_with_api_signals(self):
+        """Auth security should run when API signals are detected."""
+        recon = NexusREC("https://api.example.com")
+        recon.results = {
+            "scan_metadata": {},
+            "detected_stack": ["ASP.NET"],
+            "basic": {
+                "technologies": {"ASP.NET": "x"},
+                "headers": {},
+                "_html": '<html>api/v1/endpoint</html>',
+                "waf": ["None Detected"],
+            },
+        }
+        plan = recon._build_smart_plan(allow_prompts=False)
+        self.assertIn("auth_security", plan)
+
     def test_security_block_limits_http_heavy_modules(self):
         recon = NexusREC("https://blocked.example")
         recon.results = {

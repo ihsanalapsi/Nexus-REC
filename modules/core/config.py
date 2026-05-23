@@ -28,6 +28,9 @@ MODULES_REGISTRY = {
     'api_docs': 'modules.recon.web.api_docs.APIDocsRecon',
     'email_recon': 'modules.recon.infra.email_recon.EmailRecon',
     'salesforce': 'modules.recon.platforms.salesforce.SalesforceRecon',
+    'registration': 'modules.recon.web.registration_security.RegistrationSecurityCheck',
+    'azure_cloud': 'modules.recon.infra.azure_cloud.AzureCloudRecon',
+    'auth_security': 'modules.exploit.auth_security.AuthSecurityScanner',
 }
 
 STACK_MODULES = {
