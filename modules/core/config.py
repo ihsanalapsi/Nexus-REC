@@ -1,4 +1,4 @@
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 SCAN_MODES = ("safe", "active", "aggressive")
 
 MODULES_REGISTRY = {
