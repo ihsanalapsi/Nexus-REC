@@ -1,18 +1,5 @@
 """
 Salesforce Recon — Detect and enumerate Salesforce instances.
-
-Extracted technique from Authorized reconnaissance findings:
-- Salesforce refresh token discovered in database (REDACTED_TOKEN...)
-- Token type: `tokeng` with email `user@target.com`
-- client_id missing — `invalid_client_id` error confirmed
-- Salesforce API version discovered
-- ApiRequestLognewapis table: 172k+ records of Salesforce SOQL queries
-
-This module performs:
-- Salesforce instance detection via DNS and HTTP probing
-- Subdomain discovery (login, test, developer instances)
-- API version enumeration
-- Unauthenticated endpoint testing
 """
 
 import concurrent.futures

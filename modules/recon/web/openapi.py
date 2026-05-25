@@ -1,12 +1,6 @@
 """
 OpenAPI / Swagger Spec Analyzer — Discover, parse, and analyze API specification files.
 Extracts endpoints, methods, auth requirements, and identifies unauthenticated operations.
-
-Extracted technique from Authorized reconnaissance findings:
-- Found OpenAPI spec via GitHub (target/open-api)
-- Parsed swagger.yml to discover 200+ API endpoints
-- Identified auth requirements per endpoint
-- Found public endpoints (e.g. /ai-gateway/providers with no auth)
 """
 
 import json

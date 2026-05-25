@@ -2,11 +2,8 @@
 Server Leak Detection — Extracts internal infrastructure details from response
 headers, server timing, and version disclosure.
 
-Extracted technique from Authorized reconnaissance findings:
-- Server-Timing header revealed:
-    dc:aws-fra (data center in Frankfurt)
-    cg:global-production (control group)
-    cg:regular-staging (staging environment)
+Detected Server-Timing header revealing data center and environment:
+- Server-Timing values can disclose dc (data center) and cg (control group)
 - X-Debug-CSP-Nonce header presence
 - Version headers (X-NF-SRV-Version, etc.)
 - Timing-Allow-Origin header analysis

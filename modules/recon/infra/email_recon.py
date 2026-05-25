@@ -1,19 +1,5 @@
 """
 Email Security Recon — Analyze email infrastructure security posture.
-
-Extracted technique from Authorized reconnaissance findings:
-- SPF: `v=spf1 include:_spf.google.com ~all` (soft fail — spoofable)
-- MX: Google Workspace (`smtp.google.com`) + private mail server (`mail.target.com`)
-- IMAP/SMTP ports open: 25, 110, 143, 465, 587, 993, 995
-- SMTP credentials extracted from database: 12 accounts, 1 confirmed working
-- BCC interceptor detected on password reset emails
-
-This module performs:
-- MX record enumeration
-- SPF record lookup and analysis
-- DMARC policy detection
-- DKIM record discovery
-- Email provider identification
 """
 
 import concurrent.futures

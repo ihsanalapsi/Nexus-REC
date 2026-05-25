@@ -1,11 +1,6 @@
 """
 API Documentation Discovery — Discover and parse API documentation pages.
 
-Extracted technique from Authorized reconnaissance findings:
-- ASP.NET Web API Help page (/help) exposed 164 API endpoints
-- All controllers, actions, methods, and parameters were fully documented
-- 30+ endpoints were unauthenticated
-
 This module discovers and parses:
 - ASP.NET Web API Help Pages (/help, /help/api, /help/v1)
 - Generic API documentation pages (/docs, /api/docs)

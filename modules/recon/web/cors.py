@@ -2,12 +2,10 @@
 CORS Deep Scanner — Origin reflection, credential+wildcard checks,
 preflight analysis, and exposed method detection across multiple endpoints.
 
-Extracted technique from Authorized reconnaissance findings:
-- api.target.com had:
-    Access-Control-Allow-Credentials: true
-    Access-Control-Allow-Origin: *
-    Vary: Origin
-- api.netlify.com had wildcard CORS + write methods
+Detected production subdomain with dangerous CORS combination:
+- Access-Control-Allow-Credentials: true
+- Access-Control-Allow-Origin: *
+- Vary: Origin
 """
 
 import requests

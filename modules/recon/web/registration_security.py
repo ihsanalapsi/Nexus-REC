@@ -1,11 +1,6 @@
 """
 Registration Security Check — Discover and test registration endpoints for
 insecure practices including missing OTP enforcement and role manipulation.
-
-Extracted technique from Authorized assessment findings:
-- POST /api/v1/Auth/register accepted 'Role=Admin' without validation
-- No OTP/phone verification was required for registration
-- Registration was fully open without authentication
 """
 
 import re

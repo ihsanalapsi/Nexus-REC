@@ -1,12 +1,6 @@
 """
 Azure Cloud Reconnaissance — Detect Azure App Services, Front Door,
 IP Restrictions, Blob Storage, and CDN profiles.
-
-Extracted technique from Authorized assessment findings:
-- Production API hosted on Azure App Service (*.azurewebsites.net)
-- IP Restriction detected via x-ms-forbidden-ip header
-- Azure Blob Storage with SAS tokens discovered
-- Dev API also on Azure App Service
 """
 
 import re
