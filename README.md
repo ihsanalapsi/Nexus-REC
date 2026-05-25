@@ -45,7 +45,7 @@ Nexus-REC solves this with a **unified pipeline** that fingerprints the target f
 
 ## 📊 Engine Stats
 
-| Scanners | Modules | Patterns |
+| Scanners | Modules | Patterns | 
 |:--------:|:-------:|:--------:|
 | **539+** | **29** | **39+** |
 
@@ -337,7 +337,6 @@ This tool is intended for **authorized security testing and educational research
 ## 📖 Documentation
 
 - [Arabic README (README.ar.md)](README.ar.md) — Full documentation in Arabic
-
 - [GitHub Issues](https://github.com/ihsanalapsi/Nexus-REC/issues) — Bug reports and feature requests
 
 ---
